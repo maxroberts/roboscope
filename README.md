@@ -21,6 +21,7 @@ See [documentation/PLAN.md](documentation/PLAN.md) and
 ## Setup
 ```sh
 uv sync --dev
+uv run python scripts/fetch_sky_data.py   # ephemeris + star catalog into data/sky (~50 MB, once)
 uv run pytest
 ```
 
@@ -60,8 +61,17 @@ with Mount.connect("/dev/tty.usbserial-XXXX") as m:
   - The handbox path (`driver.py`) is kept for reference and diagnostics. With it, the
     handbox does its own gotos and tracking, and roboscope only corrects it. Commands
     marked *unverified* in `driver.py` still need confirming on hardware.
-- Planned packages: `motion`, `sky`, `camera`, `solve`, `align`, `safety` (see the
-  plan). The whole package will run on a Raspberry Pi attached to the telescope.
+- `src/roboscope/sky/`: where things are, from a site and time. Camera-agnostic.
+  - `Site`: the observing site, from lat/lon or a ZIP code.
+  - `Sky`: Skyfield + JPL DE421. Apparent alt/az with refraction for Sun, Moon, planets
+    and J2000 directions; alt/az → J2000 (exact inverse); Sun-separation safety check.
+  - `StarCatalog`: HYG v4.1 bright stars (V ≤ 6.5, ~8,900 stars, 358 named). Name
+    lookup, visibility, stars near a pointing, and alignment-star selection. Picks
+    stars that are bright, spread out and *isolated*, so a narrow in-tube camera seeing
+    one star can identify it.
+  - Data (not committed): `uv run python scripts/fetch_sky_data.py` downloads it into
+    `data/sky/`. `scripts/sky_now.py` prints what's up and suggests alignment stars.
+- Planned packages: `motion`, `camera`, `solve`, `align`, `safety` (see the plan). The whole package will run on a Raspberry Pi attached to the telescope.
 - `tests/`: pytest suite. Protocol conversions, plus the driver against the simulator.
 - `scripts/probe_mount.py`: read-only hardware probe and cable comparison.
 - `firmware/mount_controller/`: the Uno firmware that replaces the handbox. It is master

@@ -203,6 +203,14 @@ commands.
 - **Sun safety:** daytime calibration and dawn need a hard software Sun exclusion, since
   the camera or an eye at the eyepiece could be damaged [1].
 
+## Progress note (2026-11-25)
+- **Sky module done** (`roboscope.sky`).
+  - Design decision: keep it camera-agnostic, so the wide solver camera and the narrow
+    in-tube camera share it. The user expects to test the narrow approach first.
+  - For a narrow camera that sees one star, alignment stars must be *isolated*: no
+    comparably bright star within the pointing-uncertainty radius. `alignment_candidates`
+    enforces that.
+
 ## 6. Decisions and open questions
 
 Decided (2026-11-24):

@@ -13,9 +13,11 @@ Details:
       - mount:    (exists) `MotorController` for our own Uno motor controller (main
                   path: speeds, encoder positions, limits); plus the older LX200/handbox
                   driver (`Mount`) and simulators for both.
+      - sky:      (exists) site, Skyfield/DE421 positions with refraction, alt/az <->
+                  J2000, Sun-safety check, bright-star catalog with alignment-star
+                  selection for wide or narrow cameras.
     Planned:
       - motion:   backlash-aware moves, cable-wrap limits, slip detection.
-      - sky:      ephemerides and star catalog (time + location -> alt/az of targets).
       - camera:   frame capture from the imaging camera.
       - solve:    star detection and plate solving (image -> where the scope points).
       - align:    pointing model fitted from solved frames; spiral search; tracking.

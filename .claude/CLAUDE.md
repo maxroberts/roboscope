@@ -23,6 +23,11 @@ experimental results are in `documentation/hardware_findings.md`.
 
 ## Commands
 - `uv sync --dev`: install
+- `uv run python scripts/fetch_sky_data.py`: download DE421 + HYG into data/sky (needed
+  by the sky tests and module; the CDS Hipparcos server was blocked/404 on
+  2026-11-25, so the catalog comes from HYG on GitHub)
+- `uv run python scripts/sky_now.py --lat .. --lon .. [--local "YYYY-MM-DD HH:MM" --tz ..]`:
+  what's up and suggested alignment stars (moves nothing)
 - `uv run pytest`: tests
 - `uv run python scripts/probe_mount.py --port <dev> [--repeat N] [-v]`: read-only
   hardware probe and cable test (`-v` logs raw serial bytes).
@@ -36,6 +41,8 @@ experimental results are in `documentation/hardware_findings.md`.
 - Notebooks in `notebooks/` (numbered, `01_...`) for hardware experiments.
 
 ## Conventions
+- Don't put the user's own location (ZIP, coordinates) in code, tests or docs; use
+  generic sites.
 - Angles in degrees, RA in hours, longitude east-positive, UTC offset ISO sign. Meade's
   opposite conventions are converted only in `mount/protocol.py`.
 - When hardware behavior differs from the simulator, update `mount/sim.py` so the

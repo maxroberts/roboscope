@@ -7,7 +7,10 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "pandas>=3.1.1",
+    "pgeocode>=0.5.0",
     "pyserial>=3.5",
+    "skyfield>=1.55",
 ]
 
 [build-system]
