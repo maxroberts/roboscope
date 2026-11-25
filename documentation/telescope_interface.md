@@ -157,6 +157,14 @@ What people have found, and whether it applies to us:
 - **NG counts per degree (measured, ±2–3%): Az ≈ 3,085, Alt ≈ 4,230.** Not the DS
   figure of 4,928 below. So 1× sidereal ≈ speed 5,540 (Az) / 7,590 (Alt).
 
+**Bus resync** (EQMOD-ETX's "motor reset": clock high 500 ms, low 500 ms, high 250
+ms):
+- On our NG it **recovers a board that has lost bus sync** (the symptoms: silence, or
+  every GetStatus returning delta −1949 / PWM 252).
+- But **sent to a freshly started, healthy board it causes exactly that loss of
+  sync** (0/24 healthy boots with it, 16/16 resets healthy without; 2026-11-25).
+- Use it only for recovery, never routinely at boot.
+
 **Encoder counts need LED calibration first; without it they stay 0.** Remaining
 unverified on the NG: `0x02` SetOffset, `0x03` SetLEDI. `0x00` SpeedChnge was verified
 by firmware/mount_controller, including a direction reversal while moving. Counts per

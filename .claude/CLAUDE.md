@@ -30,7 +30,9 @@ experimental results are in `documentation/hardware_findings.md`.
   bench test of the motor controller (moves both axes; Az within ±3°).
 - Upload firmware: `arduino-cli upload --fqbn arduino:avr:uno -p <port> firmware/<sketch>`.
   This is safe with the mount on (pull-ups). Opening the port resets the Uno: positions
-  re-zero and default limits return.
+  re-zero and default limits return. An upload may leave the motor boards out of bus
+  sync for ~5 s until auto-recovery, so call `wait_healthy()`. Never re-enable the boot
+  resync: it caused the wedges (hardware_findings.md, 2026-11-25).
 - Notebooks in `notebooks/` (numbered, `01_...`) for hardware experiments.
 
 ## Conventions

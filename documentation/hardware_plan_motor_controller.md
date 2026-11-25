@@ -22,6 +22,9 @@ limits (Phase 3) before any long-running motion. Details in hardware_findings.md
 - link-loss detection (v2: stop on a silent board; refuse motion);
 - uncommanded-motion guard and implausible-delta rejection (added after the 22:04 false
   runaway, see hardware_findings.md);
+- bus-sync auto-recovery (resync after a link has been down 2 s while stopped). The
+  boot-time resync was found to *cause* board wedges and is off by default
+  (2026-11-25; next_session_board_wedge.md);
 - SpeedStart/SpeedChnge (incl. reversal);
 - rate accuracy ±1.5% at 0.5×–60× sidereal;
 - encoder-feedback moves to ±0.025°.

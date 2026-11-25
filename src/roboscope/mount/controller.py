@@ -24,8 +24,9 @@ Details:
 
     Opening the real port resets the Uno: positions restart at 0 at the current
     position, and the firmware restores its default limits (Az ±30850, Alt ±190000
-    counts). Right after that reset the motor boards are usually out of bus sync; the
-    firmware recovers them automatically within ~5 s, so call `wait_healthy()` before
+    counts). After a reset the boards normally answer within a fraction of a second.
+    Occasionally (e.g. after a firmware upload) they lose bus sync, and the firmware
+    recovers them automatically within ~5 s. Either way, call `wait_healthy()` before
     commanding motion. `Position.link`/`.calibrated` report the current state. The boot
     line (`boot_line`) is only a snapshot from before recovery. The
     firmware refuses motion, and stops motion, when a board stops answering (e.g. the
@@ -226,9 +227,10 @@ class MotorController:
     def wait_healthy(self, timeout_s: float = 12.0) -> Position:
         """Wait until both motor boards answer cleanly; return that Position.
 
-        After the port opens (an Uno reset), the boards are usually out of bus sync for
-        a few seconds until the firmware's auto-resync recovers them (~5 s measured,
-        2026-11-24). Call this before commanding motion.
+        After the port opens (an Uno reset) the boards normally answer within ~0.3 s.
+        If they've lost bus sync (seen after firmware uploads), the firmware's
+        auto-resync recovers them in ~5 s (measured 2026-11-24/25). Call this before
+        commanding motion.
 
         Raises:
             ControllerError: if they're not healthy within `timeout_s` (mount off,

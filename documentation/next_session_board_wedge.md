@@ -1,3 +1,21 @@
+# Motor-board "wedge" after an Uno reset — RESOLVED 2026-11-25 (mostly)
+
+**Outcome:** the repeated wedges were caused by the **boot-time resync** added the night
+before as a fix. With it removed (now the default), boots are healthy 11/12 and
+ordinary port re-opens 16/16. Firmware uploads can still wedge the boards (2/2); the
+firmware's auto-recovery clears that in ~5 s. Full results in `hardware_findings.md`
+("2026-11-25 morning").
+
+**Still open (low priority):**
+- Why the same resync heals a wedged board but wedges a fresh one.
+- Why the reset during an upload wedges the boards. Options: accept it (auto-recovered),
+  stop polling before uploads (a `QUIET` command), or disable auto-reset with a 10 µF
+  capacitor (RESET-GND) except while uploading.
+
+The original plan follows, for the record.
+
+---
+
 # Next session: the motor-board "wedge" after an Uno reset
 
 **Problem:** resetting the Uno (opening its serial port, or uploading) while

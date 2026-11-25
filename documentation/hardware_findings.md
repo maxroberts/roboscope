@@ -443,3 +443,40 @@ Known gaps carried to the next session:
    transition.
 3. Counts lost while a link is down are not recovered, so the position is invalid after
    a wedge. Absolute reference (camera, accelerometer) will fix this; for now, re-zero.
+
+## 2026-11-25 morning: wedge root cause found — the boot resync
+Setup: mount on the **12 V adapter** (no battery). Read-only experiments: each builds
+`mount_controller` with a compile-time variant, uploads it, then does N port re-opens
+(Uno resets while the firmware polls). Logs: `data/wedge_*.txt`.
+
+| Boot variant | Healthy at boot | Notes |
+|---|---|---|
+| Boot resync (last night's default) | **0/6** | rules out low battery (hypothesis 4) |
+| 5 s quiet, then resync | 0/6 | rules out "boards need quiet time" (1, 2) |
+| 200 clock bits drained, then resync | 0/6 | 2 trials then self-recovered in <1 s |
+| Resync; 100 ms pause after boot Stop | 0/6 | rules out Stop→query timing (6) |
+| **No boot resync** | **5/6**, then **11/12** | zero garbage |
+
+- **Root cause of the repeated wedges: the boot resync itself** (EQMOD-ETX's long
+  clock pulse: high 500 ms, low 500 ms, high 250 ms). It re-synchronizes a board that
+  is already wedged, but on a freshly started board it *causes* the wedge. Why it acts
+  differently in the two states is unknown. The resync was added last night as a fix
+  (~22:13); every boot after that wedged.
+- **Ordinary resets** (port re-open while polling) without the boot resync: **16/16
+  healthy**. The "reset mid-transaction" hypothesis is not supported.
+- **The reset during a firmware upload** wedged the boards 2/2 times (the first trial
+  after each flash). The upload keeps the Uno in its bootloader longer. Auto-recovery
+  cleared both (4.3 s, 6.9 s).
+- Last night's original wedges came before the boot resync: the 22:03 one during the
+  low-battery brownout, the 22:11 one right after an upload. Both are consistent with
+  the above.
+- **Firmware changes:** `BOOT_RESYNC` now defaults to 0. Resync stays available as
+  auto-recovery and the `RESYNC` command, where it works. The LED calibration is
+  re-read on every link-up transition, so `cal=` is correct after a recovery. The
+  experiment knobs that made no difference were removed.
+- **Health check on the fixed firmware** (`data/health_20261125_*`):
+  - healthy 0.3 s after boot with no resync;
+  - CAL → 189/169, `cal=1`;
+  - Az ±0.5° and Alt ±1° moves within 0.011°;
+  - two-axis +0.61/+0.60° out and back to within 0.005°;
+  - no events.

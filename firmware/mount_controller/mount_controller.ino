@@ -52,22 +52,27 @@
  *       2026-11-24: an Az board in a bad state, probably a low-battery brownout,
  *       answered polls with deltas in exact multiples of 1949 and PWM 252 while
  *       nothing moved, faking ~119° of travel.)
- *     - Bus resync at boot and on RESYNC: each axis clock is held high 500 ms, low 500 ms,
- *       then high 250 ms (EQMOD-ETX's motor-reset sequence) so a board left mid-byte by
- *       an Uno reset during a transaction re-synchronizes. (Added 2026-11-24: twice,
+ *     - Bus resync (RESYNC command and auto-recovery; NOT at boot by default): each axis
+ *       clock is held high 500 ms, low 500 ms, then high 250 ms (EQMOD-ETX's motor-reset
+ *       sequence). It re-synchronizes a board that is already wedged, but run at boot on
+ *       freshly started boards it *causes* the wedge (2026-11-25: 0/24 healthy boots with
+ *       it, across quiet-time, clock-flush and post-Stop-delay variants; 5/6 without). (Added 2026-11-24: twice,
  *       the first Uno reset after continuous polling left the boards silent or sending
- *       garbage until the mount was power-cycled.) A reset experiment showed the
- *       boards lose bit sync on 5/6 Uno resets during polling but keep their LED
- *       calibration, and that RESYNC recovers them. The boot resync first failed
- *       because back-to-back Stop retries right after it re-wedged them, so the
- *       resync is now followed by RESYNC_SETTLE_MS of quiet, and Stop retries are
- *       spaced STOP_RETRY_MS apart. That alone did NOT fix boot (5/6 still wedged; the
- *       mechanism is unknown), so:
+ *       garbage until the mount was power-cycled.) The night's reset experiments
+ *       (5/6 wedged) were run WITH the boot resync. The 2026-11-25 experiments showed
+ *       the boot resync was what wedged them; without it, port re-opens were 16/16
+ *       healthy. Only the reset during a firmware upload still wedges the boards
+ *       (2/2), which auto-recovery clears. Kept from that investigation:
+ *       RESYNC_SETTLE_MS of quiet after a resync, and Stop retries spaced
+ *       STOP_RETRY_MS apart.
  *     - Auto-recovery: if an axis link has been down (silent or garbage) for
  *       AUTO_RESYNC_AFTER_MS while nothing is commanded to move, the firmware runs the
  *       resync itself (at most every AUTO_RESYNC_EVERY_MS) and reports
- *       "EVT resync linkaz=.. linkalt=..". Empirically a resync a few seconds after
- *       boot recovers the boards every time (6/6).
+ *       "EVT resync linkaz=.. linkalt=..". On already-wedged boards it recovered all
+ *       29 wedged trials in the 2026-11-24/25 experiments; one needed a second
+ *       attempt (30 resyncs in total). The RESYNC command worked 6/6.
+ *     - On every link-up transition the board is sent Stop and its LED setting is
+ *       re-read, so `cal=` stays accurate after a recovery.
  *     - Link loss: an axis whose GetStatus goes unacknowledged LINK_FAILS times in a row
  *       is marked down. If either axis is moving at that point, both are stopped
  *       ("EVT link <axis> down"). SPEED is refused while an axis is down; it comes back
@@ -126,6 +131,13 @@ const unsigned long STOP_GRACE_MS = 1500;   // coast allowance after a stop / CA
 const unsigned long RESYNC_SETTLE_MS = 600; // quiet time after the resync pulse
 const unsigned int STOP_RETRY_MS = 20;      // spacing between Stop retries
 const unsigned long AUTO_RESYNC_AFTER_MS = 2000;
+// Whether setup() runs resyncBus(). Default OFF: the 2026-11-25 experiments showed the
+// boot resync itself wedges freshly started boards (0/24 healthy at boot with it, 5/6
+// without; documentation/hardware_findings.md). Override with -DBOOT_RESYNC=1 only for
+// experiments.
+#ifndef BOOT_RESYNC
+#define BOOT_RESYNC 0
+#endif
 const unsigned long AUTO_RESYNC_EVERY_MS = 5000;
 const int16_t MAX_DELTA = 1500;             // larger per-poll deltas are bus garbage
 
@@ -431,7 +443,7 @@ void setup() {
   for (uint8_t pin : clocks) { digitalWrite(pin, HIGH); pinMode(pin, OUTPUT); }
   dataRelease();
   Serial.begin(115200);
-  resyncBus();                            // a reset may have cut a transaction mid-byte
+  if (BOOT_RESYNC) resyncBus();           // off by default; see BOOT_RESYNC                            // a reset may have cut a transaction mid-byte
   stopAll(nullptr);                       // in case a board woke up moving
   uint8_t ledi[2];
   for (uint8_t i = 0; i < 2; i++) {
@@ -446,6 +458,7 @@ void setup() {
   Serial.print(axes[0].calibrated && axes[1].calibrated ? 1 : 0);
   Serial.print(F(" ledi_az=")); Serial.print(ledi[0]);
   Serial.print(F(" ledi_alt=")); Serial.print(ledi[1]);
+  Serial.print(F(" boot_resync=")); Serial.print((unsigned int)BOOT_RESYNC);
   Serial.print(F(" linkaz=")); Serial.print(axes[0].link);
   Serial.print(F(" linkalt=")); Serial.println(axes[1].link);
 }
@@ -485,6 +498,8 @@ void loop() {
     bool answered = pollAxis(a);
     if (!wasUp && a.link) {                 // board came (back) up: make sure it's still
       if (a.cps == 0) sendCommand(a.clk, CMD_STOP);
+      uint8_t ledi = readLedi(a);           // and refresh its calibration state
+      if (ledi > 0) a.calibrated = ledi < LEDI_UNCALIBRATED;
       Serial.print(F("EVT link ")); Serial.print(a.name); Serial.println(F(" up"));
     }
     bool inGrace = millis() - a.stoppedMs < STOP_GRACE_MS;

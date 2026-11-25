@@ -68,9 +68,10 @@ with Mount.connect("/dev/tty.usbserial-XXXX") as m:
   of the NG motor bus, keeps encoder positions, and enforces safety itself (1 s
   watchdog, predictive soft limits, speed cap, calibration gate, stop and refuse on a
   silent motor board, Stop on any uncommanded motion, rejection of implausible status
-  replies). It also auto-resyncs the motor boards when they lose bus sync, which
-  happens after most Uno resets. Hosts should call `MotorController.wait_healthy()`
-  (~5 s) before moving. Its command protocol
+  replies). It also auto-resyncs the motor boards if they lose bus sync, which happens
+  occasionally after a firmware upload. Hosts should call
+  `MotorController.wait_healthy()` before moving: usually instant, ~5 s after a
+  recovery. Its command protocol
   is in the sketch header. Bench tests: `scripts/mc_bench_test.py`.
 - `firmware/hbx_probe/`: diagnostic Uno sketch that drives the NG's motor boards directly
   over the HBX motor bus, with no handbox: handshake, motor type, status, and a
@@ -85,8 +86,8 @@ with Mount.connect("/dev/tty.usbserial-XXXX") as m:
   - `telescope_interface.md`: every input and output of the telescope (ports, LX200
     commands, motor bus), with what's been verified.
   - `hardware_findings.md`: dated experimental results.
-  - `next_session_board_wedge.md`: open problem: motor boards losing bus sync after an
-    Uno reset (auto-recovered today, root cause unknown).
+  - `next_session_board_wedge.md`: the motor-board bus-sync ("wedge") investigation.
+    Resolved: the boot-time resync was the cause.
   - `wiring_hbx_uno.md`: Uno ↔ HBX motor-bus wiring.
   - `hardware_plan_motor_controller.md`, `hardware_plan_alignment_camera.md`: hardware
     plans and shopping lists.
