@@ -56,12 +56,22 @@ with Mount.connect("/dev/tty.usbserial-XXXX") as m:
   plan). The whole package will run on a Raspberry Pi attached to the telescope.
 - `tests/`: pytest suite. Protocol conversions, plus the driver against the simulator.
 - `scripts/probe_mount.py`: read-only hardware probe and cable comparison.
+- `firmware/hbx_probe/`: Arduino Uno sketch that drives the NG's motor boards directly
+  over the HBX motor bus, with no handbox: handshake, motor type, status, and a
+  time-capped `pulse` slew, encoder LED read/calibration, and regulated-speed `run`.
+  `scripts/hbx_bridge.py`
+  holds the Uno's port open so commands never reset it; `scripts/hbx_probe.py` is a
+  standalone query script (mount off only).
+  Wiring: `documentation/wiring_hbx_uno.md`.
 - `notebooks/`: numbered exploration notebooks for hardware bring-up and experiments.
 - `documentation/`:
   - `PLAN.md`: the staged plan.
   - `telescope_interface.md`: every input and output of the telescope (ports, LX200
     commands, motor bus), with what's been verified.
   - `hardware_findings.md`: dated experimental results.
+  - `wiring_hbx_uno.md`: Uno ↔ HBX motor-bus wiring.
+  - `hardware_plan_motor_controller.md`, `hardware_plan_alignment_camera.md`: hardware
+    plans and shopping lists.
   - Meade protocol PDFs and the cable wiring diagram.
 
 Key external interface: the Meade LX200/Autostar serial protocol (9600 8N1), documented

@@ -48,5 +48,10 @@ Raspberry Pi reached over SSH. The staged plan is in `documentation/PLAN.md`.
   AUX port is a Meade accessory port, not the handbox's RS-232 port. Community sources
   (weasner.com, R. Seymour) describe it as a 4-pin modified I2C bus with battery power
   on one pin, and warn that RS-232 levels can damage it. Don't send serial data into it.
-- Project direction (2026-11-24): the AudioStar handbox will NOT be used. All pointing
-  and tracking logic is to be ours.
+- Don't power the base with its HBX port empty. The bus floats, and the mount moved on
+  its own on wall power (2026-11-24). Attach the handbox (or our controller, with
+  pull-ups) first.
+- Project direction (2026-11-24): all pointing and tracking logic is ours. The AudioStar
+  is used only as a dumb motor bridge (move/stop/azimuth readback) until our own
+  controller replaces it (documentation/hardware_plan_motor_controller.md). Never use
+  its alignment, goto or tracking.

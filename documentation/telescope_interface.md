@@ -136,7 +136,28 @@ What people have found, and whether it applies to us:
    The NG's motor boards are still unconfirmed, but the evidence now points the same way
    from two sources.
 
-## 5. Motor bus protocol (from EQMOD-ETX source [5] and Johansen [10]; not verified on the NG)
+## 5. Motor bus protocol (from EQMOD-ETX source [5] and Johansen [10]; partly verified on the NG)
+
+**Verified on our NG (2026-11-24, Arduino Uno as master; hardware_findings.md):**
+- handshake on both axis clocks;
+- `0x0B` GetMotorType → `0x0C` on both axes;
+- `0x08` GetStatus (well-formed; delta/PWM 0 so far);
+- `0x07` SlewForward (azimuth turns clockwise from above, ~1° per 250 ms) and `0x05`
+  Stop.
+
+**Also verified (sketch v2):**
+- `0x09` GetLEDI (253 at power-up);
+- `0x05`→`0xE4`→`0x04` LED calibration (→ 189 Az / 169 Alt);
+- `0x06` SlewReverse;
+- GetStatus encoder counts after calibration (~3,000–4,000 counts per 250 ms
+  full-speed pulse, signed by direction).
+
+- `0x01` SpeedStart with a signed 24-bit speed (MSB first). The boards regulate to
+  it: measured counts/s ≈ speed / 430 (1× sidereal ≈ 8,844 under DS gearing).
+
+**Encoder counts need LED calibration first; without it they stay 0.** Remaining
+unverified on the NG: `0x00` SpeedChnge, `0x02` SetOffset, `0x03` SetLEDI, and the
+NG's actual counts per degree.
 
 **Bus behavior, as Johansen describes it** [10]:
 - "Only the Hbx ever drives the clock."
@@ -162,7 +183,37 @@ encoder LED brightness)" [10]. A sample dump shows "Alt Ratio 3FAF37C0 +1.368888
 (`0x03`/`0x04` below).
 
 Each axis has its own two-wire bus: a clock driven by the master and a bidirectional
-data line. In EQMOD-ETX the azimuth bus is on HBX "Pin7" and altitude on "Pin5". The
+data line.
+
+**Expected connector pinouts (ETX-60, from EQMOD-ETX `Hardware.h` [5]; unverified on the NG):**
+
+| 8-pin HBX | Signal | | 4-pin AUX | Signal |
+|---|---|---|---|---|
+| 1 | Vbat (12 V) | | 1 | Ground |
+| 2 | AUX clock | | 2 | AUX data |
+| 3 | AUX data | | 3 | AUX clock |
+| 4 | Alt clock | | 4 | Vbat |
+| 5 | Alt data | | | |
+| 6 | Az clock | | | |
+| 7 | Az data | | | |
+| 8 | Ground | | | |
+
+- The AUX column agrees with Seymour ("outer two are battery and ground", clock and
+  data in the center) and Kauffman ("power to pin 4") [3].
+- Older EQMOD-ETX builds (Mega, WiFi) number the HBX pins from the other end: clocks
+  "Pin3" (Az) and "Pin5" (Alt), data "Pin2, 4, 6". That's the same map under
+  pin n ↔ 9 − n. **Identify the Vbat and ground ends by measurement before trusting
+  any pin number.**
+- The data lines may be shared: "the early ETX60 has all data lines joined" [5], and
+  DS mounts use "a common data line and 2 clocks" [10].
+- **Numbering is at the base socket.** The stock handbox coil cord is reversed
+  (pin 1 ↔ pin 8), so handbox-end pin n = base pin 9 − n. A straight-through Ethernet
+  cable in place of the coil cord reverses the handbox's supply polarity. That was
+  observed: the base shut off immediately (hardware_findings.md).
+- **Measured on our NG (2026-11-24, see hardware_findings.md):** +12 V between pins 1 and
+  8, so the numbering above has the right orientation. The data pins read shorted
+  together, so there's likely one shared data line plus separate AUX/Alt/Az clocks.
+  Clock pins and idle voltages not yet confirmed. The
 bit time is ~200 µs (100 µs low/high), MSB first. A transaction is: master pulls clock
 low; the motor board acknowledges by pulling data low; master raises the clock; the
 board releases data; then the command byte and its argument or reply bytes follow.
