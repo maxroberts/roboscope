@@ -6,8 +6,8 @@ Details:
     line protocol documented in the firmware header.
 
     Units: the firmware works in encoder counts; this driver converts with per-axis
-    counts-per-degree. Measured 2026-11-24 (hardware_findings.md, ±2–3%): Az ≈ 3085,
-    Alt ≈ 4230. Degrees here are *mount* angles relative to the controller's zero, not
+    counts-per-degree. Pass them from the calibration file (roboscope.calibration);
+    the built-in fallback is the 2026-11-24 measurement (Az ≈ 3085, Alt ≈ 4230, ±2–3%). Degrees here are *mount* angles relative to the controller's zero, not
     sky coordinates. Turning them into alt/az is the job of a higher layer, once the
     camera gives absolute references.
 
@@ -45,6 +45,8 @@ from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
 
+# Fallback only. The source of truth is config/hardware_calibration.json:
+# MotorController.open(dev, counts_per_degree=HardwareCalibration.load().counts_per_degree())
 COUNTS_PER_DEGREE = {"az": 3085.0, "alt": 4230.0}   # measured 2026-11-24, ±2–3%
 AXES = ("az", "alt")
 

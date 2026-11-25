@@ -40,6 +40,12 @@ experimental results are in `documentation/hardware_findings.md`.
   resync: it caused the wedges (hardware_findings.md, 2026-11-25).
 - Notebooks in `notebooks/` (numbered, `01_...`) for hardware experiments.
 
+## Calibration
+- Measured instrument properties live in `config/hardware_calibration.json` (via
+  `roboscope.calibration`), each with sigma/date/method. Record new calibration
+  measurements there (and the experiment in hardware_findings.md). Don't hard-code
+  them elsewhere.
+
 ## Conventions
 - Don't put the user's own location (ZIP, coordinates) in code, tests or docs; use
   generic sites.

@@ -71,7 +71,30 @@ with Mount.connect("/dev/tty.usbserial-XXXX") as m:
     one star can identify it.
   - Data (not committed): `uv run python scripts/fetch_sky_data.py` downloads it into
     `data/sky/`. `scripts/sky_now.py` prints what's up and suggests alignment stars.
-- Planned packages: `motion`, `camera`, `solve`, `align`, `safety` (see the plan). The whole package will run on a Raspberry Pi attached to the telescope.
+- `src/roboscope/align/`: relates mount encoder angles to true sky directions, for
+  either camera.
+  - `PointingModel`: standard alt-az terms (index offsets, base tilt, collimation,
+    axis non-perpendicularity, scale, flex), fitted by weighted least squares, mapping
+    both ways. Hardware terms can be saved and kept between sessions.
+  - `CameraFrame`: pixel ↔ sky offsets for a tube-fixed camera.
+  - `spiral_offsets`: search pattern.
+  - `AlignmentSession`: visits isolated alignment stars nearest-first, spiral-searches,
+    records observations and refits.
+  - Tested end-to-end in simulation (`tests/test_align.py`); not yet on hardware.
+    Simulated accuracy is an upper bound, since real errors (backlash, unmodelled
+    effects) will dominate.
+- `src/roboscope/calibration.py` + **`config/hardware_calibration.json`** (committed):
+  the measured properties of the instrument. Each value carries an uncertainty, date
+  and method; unmeasured values are explicit nulls with a note on how to measure them.
+  - Mount: counts/°, backlash, speed cap, travel limit.
+  - Pointing-model hardware terms.
+  - Camera frames.
+  - IMU (placeholder).
+  - `absorb_scale` folds a sky-fitted scale error into counts/°. Sessions load
+    hardware terms from here and keep them fixed, so a nightly alignment only solves
+    the setup (zero offsets, tilt).
+- Planned packages: `motion` (backlash-aware moves, hardware adapters), `camera`,
+  `solve`, `safety` (see the plan). The whole package will run on a Raspberry Pi attached to the telescope.
 - `tests/`: pytest suite. Protocol conversions, plus the driver against the simulator.
 - `scripts/probe_mount.py`: read-only hardware probe and cable comparison.
 - `firmware/mount_controller/`: the Uno firmware that replaces the handbox. It is master

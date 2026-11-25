@@ -211,6 +211,18 @@ commands.
     comparably bright star within the pointing-uncertainty radius. `alignment_candidates`
     enforces that.
 
+- **Alignment layer done in simulation** (`roboscope.align`).
+  - Findings from simulation:
+    - visit stars nearest-first, because scale errors grow with slew length;
+    - 3 stars only fit index + tilt, so far-sky errors reach ~50′ unless the hardware
+      terms (scale, collimation) are kept from an earlier session or ≥5 stars are
+      used;
+    - the narrow camera's first star can take ~200 frames of spiral search with a
+      ~1–2° initial error. Seed IA/IE from the magnetometer and accelerometer, or start
+      on the Moon.
+  - Next: hardware adapters (MotorController → `goto`/`position`; Pi camera → `locate`),
+    camera-frame calibration, backlash handling.
+
 ## 6. Decisions and open questions
 
 Decided (2026-11-24):

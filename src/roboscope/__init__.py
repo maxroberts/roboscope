@@ -16,11 +16,16 @@ Details:
       - sky:      (exists) site, Skyfield/DE421 positions with refraction, alt/az <->
                   J2000, Sun-safety check, bright-star catalog with alignment-star
                   selection for wide or narrow cameras.
+      - align:    (exists) pointing model fitted from observations (any camera), camera
+                  frame geometry, spiral search, star-alignment session; simulation-tested.
+      - calibration: (exists) the instrument's measured properties (counts/°,
+                  backlash, pointing hardware terms, camera frames) from
+                  config/hardware_calibration.json, with uncertainty and provenance.
     Planned:
-      - motion:   backlash-aware moves, cable-wrap limits, slip detection.
+      - motion:   backlash-aware moves, hardware adapters for align, cable-wrap limits,
+                  slip detection, tracking.
       - camera:   frame capture from the imaging camera.
       - solve:    star detection and plate solving (image -> where the scope points).
-      - align:    pointing model fitted from solved frames; spiral search; tracking.
 
     Intended deployment: a Raspberry Pi next to the telescope runs this package, with
     the handbox and camera on its USB ports; development and analysis happen over SSH.
