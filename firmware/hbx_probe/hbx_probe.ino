@@ -97,8 +97,10 @@ const uint8_t CMD_GET_LEDI = 0x09;
 const uint8_t CMD_SLEEP = 0xE4;
 const unsigned int PULSE_MAX_MS = 500;   // hard cap on full-speed `pulse`
 const uint8_t CMD_SPEED_START = 0x01;
-// `run` caps. With EQMOD-ETX's DS gearing (4928 counts/deg), a speed value of 8844 is
-// 1x sidereal, so 600000 is ~68x sidereal (~0.28 deg/s). 10 s at that cap is under 3 deg.
+// `run` caps. Speed value ~ 429.5 x counts/s. Measured NG scaling (2026-11-24):
+// Az ~3085 counts/deg, Alt ~4230 counts/deg, so 600000 is ~0.45 deg/s (Az) or
+// ~0.33 deg/s (Alt), and one 10 s run at the cap is under ~4.6 deg. (An earlier
+// comment assumed EQMOD-ETX's DS figure of 4928 counts/deg; the NG differs.)
 const long RUN_MAX_SPEED = 600000;
 const unsigned long RUN_MAX_MS = 10000;
 const uint8_t CMD_GET_MOTOR_TYPE = 0x0B;

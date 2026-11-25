@@ -153,11 +153,14 @@ What people have found, and whether it applies to us:
   full-speed pulse, signed by direction).
 
 - `0x01` SpeedStart with a signed 24-bit speed (MSB first). The boards regulate to
-  it: measured counts/s ≈ speed / 430 (1× sidereal ≈ 8,844 under DS gearing).
+  it: measured counts/s ≈ speed / 430.
+- **NG counts per degree (measured, ±2–3%): Az ≈ 3,085, Alt ≈ 4,230.** Not the DS
+  figure of 4,928 below. So 1× sidereal ≈ speed 5,540 (Az) / 7,590 (Alt).
 
 **Encoder counts need LED calibration first; without it they stay 0.** Remaining
-unverified on the NG: `0x00` SpeedChnge, `0x02` SetOffset, `0x03` SetLEDI, and the
-NG's actual counts per degree.
+unverified on the NG: `0x02` SetOffset, `0x03` SetLEDI. `0x00` SpeedChnge was verified
+by firmware/mount_controller, including a direction reversal while moving. Counts per
+degree need refining with the camera.
 
 **Bus behavior, as Johansen describes it** [10]:
 - "Only the Hbx ever drives the clock."

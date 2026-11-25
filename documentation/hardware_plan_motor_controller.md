@@ -12,7 +12,22 @@ under our control with no handbox. **Encoder readout works after LED calibration
 (`0x05`→`0xE4`→`0x04`, step 7). **Regulated speed control works** (`0x01` SpeedStart:
 1× to 60× sidereal measured, within ~1%, symmetric). Next: counts per degree against
 ground truth, `0x00` SpeedChnge for smooth rate changes, and the firmware watchdog and
-limits (Phase 3) before any long-running motion. Details in hardware_findings.md. Background and sources
+limits (Phase 3) before any long-running motion. Details in hardware_findings.md.
+
+**Phase 3 done (2026-11-24):** `firmware/mount_controller` (Uno) plus
+`roboscope.mount.controller.MotorController` (host). Verified on hardware:
+- watchdog;
+- predictive soft limits;
+- calibration gate;
+- link-loss detection (v2: stop on a silent board; refuse motion);
+- uncommanded-motion guard and implausible-delta rejection (added after the 22:04 false
+  runaway, see hardware_findings.md);
+- SpeedStart/SpeedChnge (incl. reversal);
+- rate accuracy ±1.5% at 0.5×–60× sidereal;
+- encoder-feedback moves to ±0.025°.
+
+Remaining: backlash measurement and compensation (needs ground truth), and absolute
+references (camera/accelerometer). Background and sources
 are in [telescope_interface.md](telescope_interface.md) §4–5.
 
 ## Why this is feasible

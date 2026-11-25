@@ -5,9 +5,11 @@ handbox). The goal is to go from "it's 19:32 on this date in this ZIP code, alig
 yourself, point at Saturn" to a centered, tracked target, using plate solving to correct
 the mount's backlash, slip and alignment errors.
 
-**Status:** Stage 1 in progress. The mount driver is written and tested against a
-simulated handbox, but not yet run on the real telescope. See
-[documentation/PLAN.md](documentation/PLAN.md) for the staged plan.
+**Status:** Stage 1 in progress. Both axes are driven by our own Arduino-based motor
+controller (no handbox): regulated speed, encoder positions and firmware safety limits
+are verified on hardware. Absolute pointing (camera, accelerometer) is not built yet.
+See [documentation/PLAN.md](documentation/PLAN.md) and
+[documentation/hardware_findings.md](documentation/hardware_findings.md).
 
 ## Prerequisites
 - [uv](https://docs.astral.sh/uv/) (installs Python 3.12 for you)
@@ -49,14 +51,28 @@ with Mount.connect("/dev/tty.usbserial-XXXX") as m:
     guide, site/time).
   - `sim.py`: a protocol-level simulated handbox for tests.
 
-  The handbox does gotos and tracking itself; roboscope corrects it via sync and pulse
-  guiding. There are no safety checks at this layer yet. Commands marked *unverified*
-  in `driver.py` still need confirming on hardware.
+  - `controller.py`: **the main path now.** `MotorController` drives our own motor
+    controller (an Arduino Uno running `firmware/mount_controller`) over USB serial:
+    - per-axis speed in °/s, encoder positions, soft limits, LED calibration;
+    - a keepalive for the firmware watchdog;
+    - encoder-feedback `move_by`;
+    - `SimulatedController` for tests.
+  - The handbox path (`driver.py`) is kept for reference and diagnostics. With it, the
+    handbox does its own gotos and tracking, and roboscope only corrects it. Commands
+    marked *unverified* in `driver.py` still need confirming on hardware.
 - Planned packages: `motion`, `sky`, `camera`, `solve`, `align`, `safety` (see the
   plan). The whole package will run on a Raspberry Pi attached to the telescope.
 - `tests/`: pytest suite. Protocol conversions, plus the driver against the simulator.
 - `scripts/probe_mount.py`: read-only hardware probe and cable comparison.
-- `firmware/hbx_probe/`: Arduino Uno sketch that drives the NG's motor boards directly
+- `firmware/mount_controller/`: the Uno firmware that replaces the handbox. It is master
+  of the NG motor bus, keeps encoder positions, and enforces safety itself (1 s
+  watchdog, predictive soft limits, speed cap, calibration gate, stop and refuse on a
+  silent motor board, Stop on any uncommanded motion, rejection of implausible status
+  replies). It also auto-resyncs the motor boards when they lose bus sync, which
+  happens after most Uno resets. Hosts should call `MotorController.wait_healthy()`
+  (~5 s) before moving. Its command protocol
+  is in the sketch header. Bench tests: `scripts/mc_bench_test.py`.
+- `firmware/hbx_probe/`: diagnostic Uno sketch that drives the NG's motor boards directly
   over the HBX motor bus, with no handbox: handshake, motor type, status, and a
   time-capped `pulse` slew, encoder LED read/calibration, and regulated-speed `run`.
   `scripts/hbx_bridge.py`
@@ -69,6 +85,8 @@ with Mount.connect("/dev/tty.usbserial-XXXX") as m:
   - `telescope_interface.md`: every input and output of the telescope (ports, LX200
     commands, motor bus), with what's been verified.
   - `hardware_findings.md`: dated experimental results.
+  - `next_session_board_wedge.md`: open problem: motor boards losing bus sync after an
+    Uno reset (auto-recovered today, root cause unknown).
   - `wiring_hbx_uno.md`: Uno ↔ HBX motor-bus wiring.
   - `hardware_plan_motor_controller.md`, `hardware_plan_alignment_camera.md`: hardware
     plans and shopping lists.

@@ -1,19 +1,18 @@
 """roboscope: self-calibrating, camera-guided control for a Meade StarNavigator NG telescope.
 
 Details:
-    Status: `mount` exists and is tested against a simulator only, not yet against real
-    hardware. All other modules are planned.
+    Status: `mount` exists and runs the real mount through our own Arduino motor
+    controller (handbox no longer needed). All other modules are planned.
 
-    The telescope is a Meade StarNavigator NG (single-arm alt-az mount) driven by an
-    AudioStar handbox. The computer talks to the handbox over RS-232 at 9600 8N1 using
-    the Meade LX200/Autostar command set (see documentation/TelescopeProtocol_2010-10.pdf).
-    The handbox, not this package, owns the motors and its own pointing model; this
-    package sends it commands and corrects its errors using camera feedback.
+    The telescope is a Meade StarNavigator NG (single-arm alt-az mount). Its AudioStar
+    handbox has been replaced: an Arduino Uno (firmware/mount_controller) is master of
+    the base's motor bus, and this package commands it over USB serial. All pointing
+    and tracking logic lives here. Camera feedback will provide absolute pointing.
 
     Modules:
-      - mount:    (exists) LX200 formatting/parsing, serial transport, the typed `Mount`
-                  API, and a simulated handbox. Written fresh from the protocol doc; the
-                  earlier telescope.py was used only for its keypad codes.
+      - mount:    (exists) `MotorController` for our own Uno motor controller (main
+                  path: speeds, encoder positions, limits); plus the older LX200/handbox
+                  driver (`Mount`) and simulators for both.
     Planned:
       - motion:   backlash-aware moves, cable-wrap limits, slip detection.
       - sky:      ephemerides and star catalog (time + location -> alt/az of targets).

@@ -269,3 +269,177 @@ Encoder readout is not yet working.
   - All stops acknowledged on the first try.
 - Still unverified: the counts-per-degree figure for the NG itself (the 4,928/° comes
   from EQMOD-ETX's DS table; the NG's gearing may differ). Needs ground truth.
+
+## 2026-11-24: counts per degree from large moves (`scripts/hbx_large_move.py`)
+- Out-and-back legs at speed 530,640 (~1,235 counts/s), chained 10 s `run`s, with 10 s
+  pauses for the user to read the angle. Raw output in `data/large_move_*.txt`.
+- Each 10 s run gave 12,456–12,505 counts (±0.2%) on both axes.
+
+| Axis | Out | Back | Net | User-read angle | **Counts/°** |
+|---|---|---|---|---|---|
+| Alt | +148,120 | −148,194 | −74 | 35° | **≈ 4,230** (±3% for ±1° reading) |
+| Az run 1 | +148,012 | −148,042 | −30 | 48° | **≈ 3,085** (±2%) |
+| Az run 2 | +148,058 | −148,087 | −29 | 48° (repeatable) | ≈ 3,085 |
+
+- **The NG's gearing differs from EQMOD-ETX's DS figure (4,928/°) and differs between
+  axes.** Cross-check: an earlier single Az pulse of 3,037 counts looked like "~1°"
+  (3,085/° → 0.98°).
+- Both axes returned to their starting marks (user), consistent with the small encoder
+  net. **No slip seen.**
+- **Azimuth shows significant backlash** on reversal (user, by eye). It's taken up on
+  reversal and returned, so it doesn't show at the end point. Size unmeasured; the
+  encoder can't separate slack from motion.
+- Derived (with these figures): 1× sidereal (15.041″/s) = **12.9 counts/s (Az)** and
+  **17.7 counts/s (Alt)**, i.e. speed values ≈ **5,540 (Az)** and **7,590 (Alt)** at
+  ~429.5 per count/s.
+- **Safety miss:** the "30°" target used the DS figure, so azimuth actually travelled
+  **48° from start, past the user's ±45° cable limit.** Rule since: targets and limits
+  use measured counts/° with margin, and a short calibration move comes before any long
+  move on unverified scaling.
+
+## 2026-11-24: our motor controller on hardware (firmware/mount_controller + MotorController)
+Bench test (`scripts/mc_bench_test.py`; log `data/mc_bench_20261124_215254.log`). Az
+was kept within ±3° of boot, inside the user's ±10° rule for this session.
+
+| Test | Result |
+|---|---|
+| Watchdog (host silent, Az 0.1°/s) | `EVT watchdog stopped` 1.0 s after the last command; moved 0.101° ✓ |
+| `0x00` SpeedChnge while moving | Alt +423 → +843 → −419 counts/s vs commanded +423/+846/−423, incl. a direction reversal ✓ (first verification of `0x00`) |
+| Sidereal on Az (12.89 cps) | 12.54 cps over 20 s (see the low-speed sweep below: within measurement noise) |
+| Predictive soft limit at +0.5° (Az, 0.3°/s) | `EVT limit` and stop at +0.439°; a further SPEED toward the limit refused ✓ |
+| `move_by` Alt ±5°, Az ±3° (0.3°/s), ×2 | All errors within ±0.025° (encoder frame) ✓ |
+| Net after everything | Az −0.011°, Alt +0.002° (encoder) |
+
+Low-speed sweep (`data/lowspeed_*.txt`), 0.5×–32× sidereal, both signs, both axes:
+- 28 measurements, **measured/commanded ratio 0.982–1.016**, no consistent bias.
+- That's at the resolution of the measurement: positions update every 100 ms per axis,
+  so a 6 s window carries ~±1.7% timing uncertainty.
+- Conclusion: the boards' speed regulation is accurate to at least ~±1.5% from 0.5× to
+  60× sidereal. Tracking should still close the loop on encoder position.
+- Firmware improvement for finer measurement: timestamp each axis's position update in
+  the POS reply.
+
+All encoder figures are motor-side; backlash and slip are not visible to them.
+
+## 2026-11-24: mount found unpowered; firmware v2 adds link-health checks
+- A two-axis test was refused at boot with "not calibrated". `CAL` then failed with
+  "noack az": the motor boards weren't answering. The mount was apparently off, or its
+  battery was exhausted after the long session (to confirm with the user).
+- Gap found: firmware v1's `POS` kept returning stale positions with no sign that the
+  boards had gone silent, and its boot flag conflated "uncalibrated" with "not
+  answering".
+- **firmware/mount_controller v2:**
+  - Tracks per-axis link health: 3 unacknowledged polls in a row mean the link is down.
+  - Stops both axes and emits `EVT link <axis> down` if this happens while moving.
+  - Refuses SPEED while a board is down.
+  - Reports `linkaz/linkalt` in POS.
+  - Boots with `ledi_az/ledi_alt/linkaz/linkalt`.
+  - Verified with the mount off: boot `calibrated=0 ledi_az=0 ledi_alt=0 linkaz=0
+    linkalt=0`, and SPEED refused with "motor board not answering (mount off?)".
+- To check at the next power-up: the LED settings should read 253 again, meaning they
+  reset on a mount power cycle, so `CAL` is needed every power-up.
+
+## 2026-11-24 ~22:04: false runaway — Az board reporting garbage (incident)
+What happened:
+- The mount was on battery (user measured 10.5 V earlier → **10.0 V** during this
+  testing; the user measured at some point during the window).
+- The boards had stopped answering (previous section).
+- A monitor (firmware v2, commanded speed 0 on both axes) saw the **Az board come back
+  answering at 22:04:18 already reporting full drive**: PWM 252, position falling
+  ~7,800 counts/s. The link dropped out every few seconds. The total by 22:05 was
+  −368,361 counts ("≈119°").
+- **The user saw nothing move.** The deltas were all exact multiples of 1,949 counts
+  per poll (−3,898, −5,847, …), i.e. a stuck bit pattern. **These were garbage
+  replies, not motion.**
+- The most likely cause is a low-battery brownout leaving the Az board's
+  microcontroller in a bad state. Probing the HBX pins while measuring may have
+  contributed; not confirmed.
+- A host STOP was sent. The board then went silent; the user power-cycled the mount.
+  After the power cycle both boards answered cleanly, and **GetLEDI read 253 again:
+  confirmed, the LED calibration resets on every mount power-up.**
+
+Firmware gaps exposed:
+1. Limits, watchdog and link checks only acted on axes the firmware had *commanded*.
+   An axis moving (or claiming to move) at commanded speed 0 was never stopped. Had
+   this been a real runaway, the cables would have been at risk.
+2. Implausible status values were accepted into the position.
+
+Fixes (firmware/mount_controller, same day):
+- **Uncommanded-motion guard:** at commanded speed 0, PWM > 0 or |delta| > 20 per poll
+  makes the firmware send Stop on every poll and report `EVT uncommanded`. A board
+  whose link comes back up is sent Stop first (`EVT link <axis> up`).
+- **Plausibility check:** |delta| > 1,500 per poll (an axis can't exceed ~1,200 per
+  100 ms poll even at full slew) is treated as a bus error (`EVT garbage`). It's not
+  added to the position and counts toward link-down. That would have rejected every
+  delta in this incident.
+- Verified after upload: clean boot (`ledi 253/253`, both links up), idle status
+  clean, no events.
+
+Rules adopted:
+- Don't probe the HBX pins while the mount is powered.
+- Don't run motion tests on a sagging battery; use fresh cells or the 12 V adapter.
+
+## 2026-11-24 ~22:10–22:15: the board fault recurs; guard tuning; resync attempt
+- **Health check after the mount power cycle** (22:10, battery): CAL → 189/169.
+  - Az ±0.5° and Alt ±1° `move_by`: errors ≤ 0.03°.
+  - Simultaneous two-axis moves: +0.61°/+0.64° vs 0.6° commanded, back to within
+    0.03°.
+  - No link drops, no garbage. **Motion is healthy.**
+  - But the new uncommanded-motion guard **fired 6 false alarms** (deltas 30–95, PWM 0):
+    normal coast just after commanded stops and CAL.
+  - Fix: a 1.5 s grace after any stop or CAL, and delta-based detection needs 2
+    consecutive polls (PWM > 0 still triggers once the grace has passed).
+  - Not yet re-verified on hardware, because of the next point.
+- **The fault recurred on the next Uno reset** (the firmware upload at ~22:11): Alt
+  silent, Az sending the same garbage (delta −1949, PWM 252) ~2 s after boot.
+  - The plausibility check rejected all of it: the position stayed 0, the link stayed
+    down, motion was refused. ✓
+- **Pattern:** both occurrences were at the first Uno reset after a session of
+  continuous polling. Resets with the idle `hbx_probe` sketch never caused it.
+  - Hypothesis: a reset landing mid-transaction leaves a board's bit receiver out of
+    step until power-cycled. Low battery (10.0 V) may contribute.
+- **Mitigation tried:** EQMOD-ETX's resync (clock high 500 ms, low 500 ms, high 250 ms)
+  at boot and as `RESYNC`.
+  - The boot resync did not clear the fault.
+  - The `RESYNC` command reported links still down, **then ~1–1.5 s later both boards
+    came back clean** (link up, PWM 0).
+  - **Inconclusive:** pending whether the user power-cycled the mount at that moment.
+- Open: the cause of the board fault; whether resync clears it; whether a clean
+  shutdown of polling before a reset (or not resetting the Uno at all: a host that
+  keeps the port open) avoids it.
+
+## 2026-11-24 ~22:15–22:30: reset-wedge experiments and auto-recovery
+User confirmed **no mount power cycle** happened at ~22:14, so the boards recovered
+without one.
+
+Experiment 1 (`data/reset_experiment_*`; read-only, 6 Uno resets while the firmware
+polled):
+- **5/6 resets left both boards out of bus sync:** links down, Az sending the −1949 /
+  PWM 252 garbage, Alt silent.
+- **A RESYNC command a few seconds after boot recovered them every time** (0.4–0.9 s
+  after it).
+- The boards **kept their LED calibration** (Alt still read 169 in trial 2). Their
+  microcontrollers aren't rebooting; they lose bit sync.
+
+Experiment 2 (`reset_experiment2_*`): the resync at boot, plus 600 ms of settle time
+and Stop retries spaced 20 ms apart → still 5/6 wedged. **Why the boot resync fails
+while a later one works is unexplained.**
+
+Experiment 3 (`reset_experiment3_*`): firmware **auto-recovery** (resync when a link
+has been down ≥2 s while stopped, at most every 5 s) → **6/6 healthy 4.7–5.3 s after
+reset**, one auto-resync each.
+
+Final motion health check (`data/health_*`, after `wait_healthy()` + CAL):
+- Az ±0.5°, Alt ±1°: errors ≤ 0.02°.
+- Two-axis simultaneous: +0.63/+0.62° out, back to within 0.02°.
+- **No uncommanded-motion false alarms** (guard tuning verified), no garbage during
+  motion.
+
+Known gaps carried to the next session:
+1. **Root cause of the wedge** is unknown: a reset mid-transaction is suspected, but
+   the boot resync doesn't clear it.
+2. After auto-recovery the firmware still reports `cal=0`: the resync's LED re-read
+   ran before the links were back. Fix: re-read the LED setting on each link-up
+   transition.
+3. Counts lost while a link is down are not recovered, so the position is invalid after
+   a wedge. Absolute reference (camera, accelerometer) will fix this; for now, re-zero.
