@@ -1,0 +1,17 @@
+// roboscope camera Pi: what unattended-upgrades may install.
+// Deployed from the roboscope repo (hardware/camera_pi/rootfs); edit it there, not on the Pi.
+//
+// The stock 50unattended-upgrades only matches origin=Debian. This 32-bit Pi OS pulls from
+// origin=Raspbian (raspbian.raspberrypi.com) and origin="Raspberry Pi Foundation"
+// (archive.raspberrypi.com), so the stock config upgrades nothing. Raspbian has no
+// separate security suite, so allow all of the stable release from both origins.
+// Checked with `apt-cache policy` on 2026-11-25. This file is read after 50-, and list
+// entries are appended to the stock ones.
+//
+// No automatic reboot: a reboot mid-observation would drop the camera. Check for
+// /var/run/reboot-required and reboot by hand between sessions.
+Unattended-Upgrade::Origins-Pattern {
+        "origin=Raspbian,codename=${distro_codename},label=Raspbian";
+        "origin=Raspberry Pi Foundation,codename=${distro_codename},label=Raspberry Pi Foundation";
+};
+Unattended-Upgrade::Automatic-Reboot "false";

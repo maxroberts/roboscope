@@ -1,0 +1,5 @@
+// roboscope camera Pi: run apt update and unattended-upgrade daily (apt-daily timers).
+// Deployed from the roboscope repo (hardware/camera_pi/rootfs); edit it there, not on the Pi.
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::AutocleanInterval "7";

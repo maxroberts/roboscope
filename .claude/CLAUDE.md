@@ -11,6 +11,10 @@ experimental results are in `documentation/hardware_findings.md`.
 ## Hardware
 - Mount: StarNavigator NG 102 (102 mm refractor, 660 mm f/6.5), AudioStar handbox.
 - Main camera: the user's existing Pi Zero W + Pi camera rig at the focuser (~0.3° field).
+  Reached as `max@roboscopeCam.local` with SSH keys only; Pi OS Lite Trixie, OV5647,
+  `rpicam-*` tools. Its config lives in `hardware/camera_pi/` and is applied with
+  `scripts/deploy_camera_pi.sh`. Change config there, never only on the Pi. sudo
+  needs the user's password; never write it into a file.
 - Motor control: Arduino Uno on the HBX port (firmware/mount_controller), USB to the
   host; the handbox is no longer used. Wiring: documentation/wiring_hbx_uno.md.
 - Host computer (planned): Pi 3B+, 64-bit Pi OS. Planned solver camera: Pi HQ + 16–25 mm lens.
@@ -29,6 +33,8 @@ experimental results are in `documentation/hardware_findings.md`.
 - `uv run python scripts/sky_now.py --lat .. --lon .. [--local "YYYY-MM-DD HH:MM" --tz ..]`:
   what's up and suggested alignment stars (moves nothing)
 - `uv run pytest`: tests
+- `scripts/deploy_camera_pi.sh [host]`: push `hardware/camera_pi/` config to the camera
+  Pi and run its idempotent `provision.sh` (sudo password prompt).
 - `uv run python scripts/probe_mount.py --port <dev> [--repeat N] [-v]`: read-only
   hardware probe and cable test (`-v` logs raw serial bytes).
 - `uv run python scripts/mc_bench_test.py --port /dev/cu.usbmodem113301`: hardware

@@ -113,6 +113,12 @@ with Mount.connect("/dev/tty.usbserial-XXXX") as m:
   holds the Uno's port open so commands never reset it; `scripts/hbx_probe.py` is a
   standalone query script (mount off only).
   Wiring: `documentation/wiring_hbx_uno.md`.
+- `hardware/camera_pi/`: the focuser camera's Pi Zero W (`roboscopeCam.local`, Pi OS
+  Lite Trixie, OV5647). This folder is the source of truth for its setup: `rootfs/`
+  config files plus `provision.sh`, pushed and applied by `scripts/deploy_camera_pi.sh`
+  (key-only SSH, automatic updates, Bluetooth off). Its README covers rebuilding the
+  card and the camera's verified state. `legacy_2019/` holds redacted copies of the
+  old webcam setup. There's no roboscope camera code on the Pi yet.
 - `notebooks/`: numbered exploration notebooks for hardware bring-up and experiments.
 - `documentation/`:
   - `PLAN.md`: the staged plan.
@@ -122,6 +128,7 @@ with Mount.connect("/dev/tty.usbserial-XXXX") as m:
   - `next_session_board_wedge.md`: the motor-board bus-sync ("wedge") investigation.
     Resolved: the boot-time resync was the cause.
   - `wiring_hbx_uno.md`: Uno ↔ HBX motor-bus wiring.
+  - `camera_pi_state.md`: the camera Pi as found before its 2026-11-25 reinstall.
   - `hardware_plan_motor_controller.md`, `hardware_plan_alignment_camera.md`: hardware
     plans and shopping lists.
   - Meade protocol PDFs and the cable wiring diagram.
