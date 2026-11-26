@@ -1,0 +1,22 @@
+# roboscope camera Pi: DHCP for the host on the other end of the USB cable.
+# Hands out exactly one address, 10.12.194.2, with no router and no DNS server, so the
+# host never routes traffic through the Pi (unlike NetworkManager's "shared" mode, which
+# turns on IP forwarding and NAT). Every host gets the same address because g_ether gives
+# the host end a fixed MAC (etc/modprobe.d/g_ether.conf). DNS is off (--port=0) and the
+# lease is kept in memory only (--leasefile-ro). --bind-dynamic lets it start before usb0
+# has its address.
+# Deployed from the roboscope repo (hardware/camera_pi/rootfs); edit it there, not on the Pi.
+[Unit]
+Description=roboscope USB link DHCP (one address, no gateway)
+After=network.target
+
+[Service]
+ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/dev/null --pid-file= \
+    --port=0 --interface=usb0 --bind-dynamic --dhcp-authoritative --leasefile-ro \
+    --dhcp-range=10.12.194.2,10.12.194.2,255.255.255.240,12h \
+    --dhcp-option=option:router --dhcp-option=option:dns-server
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

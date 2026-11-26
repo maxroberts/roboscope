@@ -36,9 +36,10 @@ Details:
       - after 30 s with no requests and no viewer it idles at 1 fps (~5% CPU), and
         the next request wakes it (first locate ≈ 0.9 s).
     The browser preview is rendered and JPEG-encoded on the Pi. Shipping raw frames
-    for the Mac to render would cost the Pi more: SSH encryption on the Zero runs at
-    ~1.5 MB/s with the CPU saturated, and a raw frame is ~8× the size of a preview
-    JPEG.
+    over Wi-Fi for the host to render would cost the Pi more: SSH over Wi-Fi moves
+    ~0.5–1.5 MB/s, and a raw frame is ~8× the size of a preview JPEG. Over the USB link
+    (hardware/camera_pi/README.md) plain TCP reaches 14 MB/s, which may reverse this;
+    the server doesn't listen on that link yet.
 """
 
 from .client import CameraClient, CameraError, SshTunnel, connect

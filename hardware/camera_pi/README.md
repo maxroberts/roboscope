@@ -9,11 +9,17 @@ edit config on the Pi directly; edit it here and redeploy.
 
 | Path | What it is |
 |---|---|
-| `provision.sh` | Runs on the Pi as root. Installs packages (incl. the camera stack from apt), copies `rootfs/` over `/`, validates and reloads sshd, disables Bluetooth, installs the camera server to `/opt/roboscope` and restarts its service, prints `REBOOT NEEDED` when needed. Idempotent. |
+| `provision.sh` | Runs on the Pi as root. Installs packages (incl. the camera stack from apt), copies `rootfs/` over `/`, validates and reloads sshd, disables Bluetooth, sets up the USB gadget link (replacing the stock `rpi-usb-gadget` setup), moves the Wi-Fi connection out of netplan, installs the camera server to `/opt/roboscope` and restarts its service, prints `REBOOT NEEDED` when needed. Idempotent. Run it over Wi-Fi: the USB step can drop the USB link. |
 | `rootfs/etc/ssh/sshd_config.d/10-roboscope-keyonly.conf` | Key-only SSH, no root login (overrides the Imager's `50-cloud-init.conf`). |
 | `rootfs/etc/apt/apt.conf.d/20auto-upgrades` | Daily apt update + unattended-upgrade. |
 | `rootfs/etc/apt/apt.conf.d/52roboscope-unattended-upgrades` | Lets unattended-upgrades install from the Raspbian and Raspberry Pi origins (the stock config only matches Debian's, so it would upgrade nothing). No automatic reboot. |
 | `rootfs/etc/systemd/system/roboscope-camera.service` | Runs `python3 -m roboscope_camera.server --source pi` as `max` on 127.0.0.1:47623 (= `client.PORT`), restart on failure. |
+| `rootfs/etc/modules-load.d/roboscope-usb-gadget.conf`, `rootfs/etc/modprobe.d/g_ether.conf` | Load the USB Ethernet gadget (`g_ether`) at boot, with fixed MACs (Pi end `02:72:62:00:00:01`, host end `02:72:62:00:00:02`). |
+| `rootfs/etc/NetworkManager/system-connections/roboscope-usb0.nmconnection` | `usb0`: static 10.12.194.1/28, no gateway. Installed mode 600. |
+| `rootfs/etc/udev/rules.d/86-roboscope-usb0-managed.rules` | Lets NetworkManager manage `usb0`. Its own `85-nm-unmanaged.rules` ignores every USB gadget interface, which left the link down on every boot. |
+| `rootfs/etc/systemd/system/roboscope-usb-dhcp.service` | dnsmasq, DHCP only on `usb0`: gives the host 10.12.194.2, no router, no DNS. Replaces NetworkManager's "shared" mode, which turns on IP forwarding and NAT. |
+| `rootfs/etc/rpi/swap.conf.d/90-roboscope.conf` | Swap to zram only. The default swap file was re-`mkswap`ed on every boot (~21 s). |
+| `rootfs/etc/cloud/cloud-init.disabled` | cloud-init off after provisioning (~45 s per boot). A fresh card doesn't have this file, so the Imager's first-boot setup still runs. |
 | (from `src/roboscope/camera/`) | The camera server code. Not kept here: the deploy script copies it from the package to the Pi as `roboscope_camera/`. |
 | `legacy_2019/` | Redacted copies of the old Buster setup (UV4L webcam), for reference only. Not deployed. |
 
@@ -27,13 +33,16 @@ edit config on the Pi directly; edit it here and redeploy.
    - SSH: on, public-key, with the Mac's `~/.ssh/id_ed25519.pub`.
 2. Boot it, then run `ssh max@roboscopeCam.local true` once to accept the host key.
 3. `sudo apt update && sudo apt full-upgrade` on the Pi (slow on a Zero: ~20 min).
-4. `scripts/deploy_camera_pi.sh` from the repo root (asks for the Pi's sudo password).
+4. `scripts/deploy_camera_pi.sh <Wi-Fi IP>` from the repo root (asks for the Pi's sudo
+   password). Use the Wi-Fi address rather than `roboscopeCam.local`, which can resolve
+   to the USB link.
 5. Reboot if it prints `REBOOT NEEDED`.
 
 ## Current state (2026-11-25)
 - Raspberry Pi OS Lite 32-bit, Trixie (Debian 13), kernel 6.18.60+rpt-rpi-v6. Fully
   upgraded, then provisioned with the files above.
-- Listening: SSH (22) and mDNS (5353) only. There's no firewall. The Pi sits behind the home router's
+- Listening: SSH (22) and mDNS (5353) on all interfaces, plus DHCP (67) on `usb0`
+  only. There's no firewall. The Pi sits behind the home router's
   NAT (assumed to have no port forwards to it; not checked), and the OS is supported
   and auto-updating. So it isn't restricted to the LAN; apt needs outbound access.
 - Camera: `rpicam-hello --list-cameras` shows the ov5647. Modes:
@@ -49,6 +58,18 @@ edit config on the Pi directly; edit it here and redeploy.
   being formed (no lens, or not on the telescope at the time). The magenta comes from
   libcamera's lens-shading correction tuned for the stock lens. For astronomy, use raw
   or turn that correction off.
+
+## USB link (2026-11-25)
+A micro-USB **data** cable from the Zero's "USB" port (nearest the mini-HDMI, not PWR
+IN) to the host powers the Zero and is also an Ethernet link (USB gadget, CDC-ECM on
+macOS and Linux). Wi-Fi stays up for management and updates.
+- Pi: `10.12.194.1` (`ssh max@10.12.194.1`, same host key as over Wi-Fi). Host:
+  always `10.12.194.2`, with no gateway, so its internet route is unaffected.
+- No IP forwarding or NAT on the Pi.
+- Measured Zero → Mac: plain TCP 14 MB/s (the Zero's CPU is the limit), SSH 4.5 MB/s,
+  round trip 0.8 ms. Over Wi-Fi: 0.8–2.6 MB/s plain, ~0.5 MB/s SSH. Details and the
+  reboot tests: `documentation/hardware_findings.md` ("2026-11-25 evening: camera Pi USB link…").
+- The camera server doesn't listen on the link yet; use it through SSH for now.
 
 ## Camera server
 - `roboscope-camera.service` owns the camera from boot (only one process can). See
@@ -70,8 +91,8 @@ edit config on the Pi directly; edit it here and redeploy.
   - idle mode drops to 1 fps (~5% CPU) after 30 s with no requests and no open
     viewer; the next request wakes it;
   - locate takes ≈ 0.6–0.8 s (1 ms exposure), or ≈ 1.5 s at full resolution;
-  - streaming runs on the Pi, because sending raw frames would cost more: SSH moves
-    ~1.5 MB/s with the Zero's CPU saturated, and a raw binned frame is 630 KB against
+  - streaming runs on the Pi, because sending raw frames over Wi-Fi would cost more:
+    SSH over Wi-Fi moves ~0.5–1.5 MB/s (it varies), and a raw binned frame is 630 KB against
     a ~75 KB preview JPEG (lensless test frames; a dark sky compresses much better);
   - the preview defaults to 2 fps at JPEG quality 70;
   - the MJPEG preview reaches ≈ 2 fps through the tunnel (on the Zero, preview rendering

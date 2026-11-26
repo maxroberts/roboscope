@@ -14,7 +14,9 @@ experimental results are in `documentation/hardware_findings.md`.
   Reached as `max@roboscopeCam.local` with SSH keys only; Pi OS Lite Trixie, OV5647,
   `rpicam-*` tools. Its config lives in `hardware/camera_pi/` and is applied with
   `scripts/deploy_camera_pi.sh`. Change config there, never only on the Pi. sudo
-  needs the user's password; never write it into a file.
+  needs the user's password; never write it into a file. Also reachable over a USB
+  gadget link (cable in the Zero's "USB" port; Pi 10.12.194.1, host 10.12.194.2);
+  deploy over Wi-Fi by IP, since provisioning can drop the USB link.
 - Motor control: Arduino Uno on the HBX port (firmware/mount_controller), USB to the
   host; the handbox is no longer used. Wiring: documentation/wiring_hbx_uno.md.
 - Host computer (planned): Pi 3B+, 64-bit Pi OS. Planned solver camera: Pi HQ + 16–25 mm lens.

@@ -1,0 +1,4 @@
+# roboscope camera Pi: cloud-init off. It applies the Imager's settings on a fresh card's
+# first boot (before this file exists) and then only costs ~45 s per boot on the Zero.
+# cloud-init checks only that this file exists; the text is for people.
+# Deployed from the roboscope repo (hardware/camera_pi/rootfs); edit it there, not on the Pi.

@@ -1,0 +1,7 @@
+# roboscope camera Pi: let NetworkManager manage the USB gadget interface, so it brings
+# up roboscope-usb0.nmconnection at boot. NetworkManager's own
+# /usr/lib/udev/rules.d/85-nm-unmanaged.rules marks every gadget interface unmanaged
+# (DEVTYPE=gadget), expecting the gadget's creator to set it up; with it, usb0 stayed
+# down on every boot (2026-11-25). This file sorts after 85-, so it wins. usb0 only.
+# Deployed from the roboscope repo (hardware/camera_pi/rootfs); edit it there, not on the Pi.
+SUBSYSTEM=="net", ENV{DEVTYPE}=="gadget", ENV{INTERFACE}=="usb0", ENV{NM_UNMANAGED}="0"

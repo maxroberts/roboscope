@@ -9,6 +9,8 @@
 # terminal (or reads it from stdin when not run from a terminal).
 #
 # Usage: scripts/deploy_camera_pi.sh [host]   (default roboscopeCam.local)
+# Prefer the Pi's Wi-Fi IP as host when the USB link is plugged in: the .local name can
+# resolve to the USB address, and provisioning can drop that link mid-run.
 set -euo pipefail
 HOST=${1:-roboscopeCam.local}
 USER_ON_PI=${USER_ON_PI:-max}

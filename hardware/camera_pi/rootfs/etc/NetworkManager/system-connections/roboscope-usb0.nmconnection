@@ -1,0 +1,18 @@
+# roboscope camera Pi: the USB gadget link. Static 10.12.194.1/28, no gateway, no NAT.
+# The host gets 10.12.194.2 from roboscope-usb-dhcp.service. provision.sh installs this
+# file with mode 600 (NetworkManager ignores keyfiles readable by others).
+# Deployed from the roboscope repo (hardware/camera_pi/rootfs); edit it there, not on the Pi.
+[connection]
+id=roboscope-usb0
+type=ethernet
+interface-name=usb0
+autoconnect=true
+
+[ethernet]
+
+[ipv4]
+method=manual
+address1=10.12.194.1/28
+
+[ipv6]
+method=disabled

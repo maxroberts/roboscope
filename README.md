@@ -148,8 +148,9 @@ with connect() as cam:                     # SSH tunnel to roboscopeCam.local
 - `hardware/camera_pi/`: the focuser camera's Pi Zero W (`roboscopeCam.local`, Pi OS
   Lite Trixie, OV5647). This folder is the source of truth for its setup: `rootfs/`
   config files plus `provision.sh`, pushed and applied by `scripts/deploy_camera_pi.sh`
-  (key-only SSH, automatic updates, Bluetooth off, the camera server and its systemd
-  unit, which runs `roboscope.camera` copied to /opt/roboscope). Its README covers
+  (key-only SSH, automatic updates, Bluetooth off, a USB gadget link to the host,
+  boot-time trims that took boot from ~3 min to ~1¼ min, and the camera server and its
+  systemd unit, which runs `roboscope.camera` copied to /opt/roboscope). Its README covers
   rebuilding the card and the camera's verified state. `legacy_2019/` holds redacted
   copies of the old webcam setup.
 - `notebooks/`: numbered exploration notebooks for hardware bring-up and experiments.

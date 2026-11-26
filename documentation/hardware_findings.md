@@ -480,3 +480,87 @@ Setup: mount on the **12 V adapter** (no battery). Read-only experiments: each b
   - Az ±0.5° and Alt ±1° moves within 0.011°;
   - two-axis +0.61/+0.60° out and back to within 0.005°;
   - no events.
+
+## 2026-11-25 evening: camera Pi USB link, boot time, 3B+ SD card
+Setup: the camera Pi (Pi Zero W, Trixie) powered and connected by one micro-USB data
+cable from its "USB" port to the Mac; Wi-Fi up as well. Config:
+`hardware/camera_pi/` (deployed with `scripts/deploy_camera_pi.sh`). Throughput and
+reboot tests were ad-hoc scripts (not kept); the numbers are their printed output.
+
+**Throughput, Zero → Mac** (10–30 MiB of random data, 2–3 runs each, timed without
+the SSH login):
+
+| Link | Plain TCP | SSH | Round trip |
+|---|---|---|---|
+| Wi-Fi | 0.8–2.6 MB/s (erratic) | 0.47–0.59 MB/s | — |
+| USB gadget (CDC-ECM) | **14.1–14.4 MB/s**, Zero CPU 100% | 4.5–4.6 MB/s | 0.8 ms |
+
+- Over USB the Zero's CPU is the limit. That makes ~70 ms of CPU per MB sent
+  unencrypted, so a 630 KB analysis frame costs ~45 ms to ship, against ~170 ms for
+  `find_star` on the Zero. This is an estimate from throughput, not a measurement
+  with the camera server.
+- The Zero ran from the Mac's port with no undervoltage (`throttled=0x0`).
+
+**Stock `rpi-usb-gadget` (preinstalled, v1.0.6), first try:**
+- On the first boot after enabling it (also the first boot powered from the data
+  port), the link was one-way. The Zero received 1 packet while the Mac sent 124. The
+  Mac never got a DHCP lease and self-assigned 169.254.x.
+- Reloading `g_ether` fixed it. Unloading logged `dwc2_hsotg_ep_stop_xfr: timeout
+  GINTSTS.GOUTNAKEFF`, i.e. the OUT (host → Zero) endpoint was stuck.
+- The next stock boot worked.
+- Its "shared" mode turns on IP forwarding and NAT, and it picks random MACs each
+  boot. Both were replaced: `provision.sh` turns the stock setup off and installs our
+  own (static 10.12.194.1/28 on `usb0`, dnsmasq gives the host exactly 10.12.194.2
+  with no router and no DNS, fixed MACs `02:72:62:00:00:01/02`).
+- `g_ether` always fails once at ~29 s ("couldn't find an available UDC"), then binds
+  when dwc2 appears at ~44–56 s. This is harmless.
+
+**Boot time (single boots, `systemd-analyze`):**
+
+| Change | Boot |
+|---|---|
+| As provisioned | 3 min 4 s (NetworkManager.service 77 s) |
+| Wi-Fi moved from netplan to a NetworkManager keyfile | 2 min 8 s (NetworkManager 22 s) |
+| + swap to zram only, cloud-init disabled | **1 min 16 s** |
+
+- **netplan:** NetworkManager rewrote `/etc/netplan/90-NM-*.yaml` on every boot. Each
+  write ran `netplan generate` and a systemd daemon-reload of ~13 s on the Zero, 4
+  times, while NetworkManager started.
+- **Swap:** `rpi-resize-swap-file` re-ran `mkswap` on a 426 MiB `/var/swap` every
+  boot (~21 s).
+- **cloud-init:** ~45 s per boot across its stages, after the first.
+- **apt-daily was not a cause.** It already runs at most once a day (stamp files),
+  and on a boot where it didn't run at all the boot still took 3 min 4 s.
+
+**Our gadget config, reboot tests** (reboot over SSH, then poll until both links
+answer):
+- **First version: 0/5 boots.** `usb0` stayed down because NetworkManager marks every
+  gadget interface unmanaged (`/usr/lib/udev/rules.d/85-nm-unmanaged.rules`:
+  `ENV{DEVTYPE}=="gadget", ENV{NM_UNMANAGED}="1"`). The stock tool works around this
+  at runtime with `nmcli device set usb0 managed yes`.
+- **Fix:** `rootfs/etc/udev/rules.d/86-roboscope-usb0-managed.rules` sets
+  `NM_UNMANAGED=0` for `usb0` only.
+- **With the fix: 21/21 boots** (5 + 15 + 1 with a never-seen host MAC, which makes
+  macOS see a new device).
+  - Boot took 1 min 15.0–15.9 s.
+  - USB SSH worked 87–113 s after the reboot command, and Wi-Fi SSH at 102–113 s.
+    USB was usually ~15 s earlier.
+  - The host got 10.12.194.2 every time, and `ip_forward=0` every time.
+- **Recovery:** after restarting NetworkManager or the DHCP service, the link was
+  back in ~3 s. After reloading `g_ether` it was back in ~6 s.
+
+**Open:**
+- The one-way first boot hasn't recurred in 22 boots. Its cause is unknown, and two
+  conditions of that boot were never repeated: the stock config, and a cold power-up
+  from the Mac's port. Every later boot was a warm reboot.
+- If it recurs, the signature is Zero `usb0` rx_packets stuck while the host's
+  packets-out count rises. Reloading `g_ether` cleared it.
+- Not yet tested: a cold power-up (unplug and replug), and a Pi (the 3B+) as the
+  host.
+
+**3B+ SD card** (32 GB, named "test"; f3 v10 `f3write` + `f3read` on the Mac):
+- 29.61 GB written and verified, 0 sectors lost, corrupted, changed or overwritten.
+  The capacity is real.
+- Reads ran at 44 MB/s, steady.
+- Writes averaged 4.6 MB/s, with a minimum of 0.26 MB/s, over 1 h 49 min. The card
+  is sound but slow to write.
