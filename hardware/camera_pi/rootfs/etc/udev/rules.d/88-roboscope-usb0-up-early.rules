@@ -1,0 +1,9 @@
+# roboscope camera Pi: bring usb0 up as soon as it appears, without waiting for
+# NetworkManager (which then assigns the address as usual).
+# Deployed from the roboscope repo (hardware/camera_pi/rootfs); edit it there, not on the Pi.
+#
+# At boot, rule 87 already loads g_ether and opens usb0 in one step. This rule covers
+# any other way g_ether gets loaded (the watchdog's reload, a manual modprobe): opening
+# usb0 late, after the host has started sending, can leave the link one-way (see rule 87
+# and hardware_findings.md, 2026-11-26).
+SUBSYSTEM=="net", ACTION=="add", KERNEL=="usb0", RUN+="/usr/bin/ip link set usb0 up"

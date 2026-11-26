@@ -109,5 +109,8 @@ def test_idle_mode_switches_and_wakes(cam, monkeypatch):
             break
         __import__("time").sleep(0.05)
     assert srv.idle and src.idle
+    # Long timeout again before waking it: with 0.3 s, a slow machine (the 3B+) can
+    # legitimately go idle again between locate() and status().
+    monkeypatch.setattr(server_mod, "IDLE_AFTER_S", 60.0)
     assert client.locate() is not None                # a request wakes it ...
     assert client.status()["idle"] is False and src.idle is False   # ... at once

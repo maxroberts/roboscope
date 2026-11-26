@@ -1,0 +1,25 @@
+# roboscope host Pi: the USB link to the camera Pi Zero (USB Ethernet gadget, cdc_ether).
+# Deployed from the roboscope repo (hardware/host_pi/rootfs); edit it there, not on the Pi.
+#
+# The Zero's gadget always presents host-side MAC 02:72:62:00:00:02 (camera_pi
+# rootfs/etc/modprobe.d/g_ether.conf), so the profile binds to that MAC, whatever the
+# interface is called. Static 10.12.194.2/28 rather than DHCP from the Zero: the 3B+
+# boots faster than the Zero, and with DHCP NetworkManager gave up before the Zero's
+# dnsmasq was up, leaving the link without an address (2026-11-26). The Zero's DHCP hands
+# out the same address, so a Mac plugged in instead still works.
+# No gateway (never-default): internet traffic stays on Wi-Fi.
+[connection]
+id=roboscope-camlink
+type=ethernet
+autoconnect=true
+
+[ethernet]
+mac-address=02:72:62:00:00:02
+
+[ipv4]
+method=manual
+address1=10.12.194.2/28
+never-default=true
+
+[ipv6]
+method=disabled

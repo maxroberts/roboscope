@@ -1,0 +1,18 @@
+# roboscope camera Pi: load the USB Ethernet gadget (g_ether) once the Zero's USB device
+# controller (dwc2, UDC 20980000.usb) exists, and bring usb0 up in the same step.
+# Deployed from the roboscope repo (hardware/camera_pi/rootfs); edit it there, not on the Pi.
+#
+# Why: after a cold power-up the link often came up one-way (the host's frames stopped
+# reaching the Zero) when usb0 was opened more than a few seconds after the host had
+# enumerated the gadget (hardware_findings.md, 2026-11-26):
+#   - g_ether from modules-load.d, usb0 opened by NetworkManager ~23 s later: 10 of 14 failed;
+#   - g_ether from this rule (no "up"), NetworkManager ~13 s later: 4 of 8 failed;
+#   - modules-load.d + usb0 up by udev rule 88, ~12 s late: 5 of 10 failed;
+#   - this rule + rule 88, ~5 s: 0 of 11 failed.
+# The likely mechanism (not proven): the host's network driver times out its transmit
+# queue after 5 s and cancels its pending sends, which can leave the Zero's receive
+# endpoint stuck. Loading and opening in one command shrinks the gap to well under 1 s.
+# modprobe returns after g_ether has bound and created usb0. NetworkManager assigns the
+# address later as usual. Options (fixed MACs) come from /etc/modprobe.d/g_ether.conf.
+# The `logger` line records when usb0 came up (journalctl -t roboscope-gadget).
+SUBSYSTEM=="udc", ACTION=="add", KERNEL=="20980000.usb", RUN+="/bin/sh -c '/usr/sbin/modprobe g_ether && /usr/bin/ip link set usb0 up && /usr/bin/logger -t roboscope-gadget usb0 up'"

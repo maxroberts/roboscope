@@ -148,11 +148,22 @@ with connect() as cam:                     # SSH tunnel to roboscopeCam.local
 - `hardware/camera_pi/`: the focuser camera's Pi Zero W (`roboscopeCam.local`, Pi OS
   Lite Trixie, OV5647). This folder is the source of truth for its setup: `rootfs/`
   config files plus `provision.sh`, pushed and applied by `scripts/deploy_camera_pi.sh`
-  (key-only SSH, automatic updates, Bluetooth off, a USB gadget link to the host,
+  (key-only SSH, automatic updates, Bluetooth off, a USB gadget link to the host (opened as
+  soon as the gadget loads, which fixed a one-way link after cold power-ups, plus a watchdog),
   boot-time trims that took boot from ~3 min to ~1¼ min, and the camera server and its
   systemd unit, which runs `roboscope.camera` copied to /opt/roboscope). Its README covers
   rebuilding the card and the camera's verified state. `legacy_2019/` holds redacted
   copies of the old webcam setup.
+- `hardware/host_pi/`: the Raspberry Pi 3B+ that will run roboscope at the telescope
+  (`roboscope.local`, Pi OS Lite 64-bit Trixie). It holds the Uno by USB serial and the
+  camera Zero by its USB link. As with the camera Pi, `rootfs/` config plus
+  `provision.sh` are applied by `scripts/deploy_host_pi.sh`:
+  - key-only SSH, automatic updates, Bluetooth off and boot trims;
+  - a static address on the camera link;
+  - uv, and an SSH key authorized on the Zero.
+
+  The same script syncs the repo to `~/roboscope` on the Pi and runs `uv sync`.
+  Its power supply is still marginal (see its README).
 - `notebooks/`: numbered exploration notebooks for hardware bring-up and experiments.
 - `documentation/`:
   - `PLAN.md`: the staged plan.

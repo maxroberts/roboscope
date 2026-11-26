@@ -1,0 +1,13 @@
+# roboscope camera Pi: USB link watchdog (see /usr/local/lib/roboscope/usb-link-watchdog.sh).
+# Deployed from the roboscope repo (hardware/camera_pi/rootfs); edit it there, not on the Pi.
+[Unit]
+Description=roboscope USB link watchdog (reload g_ether if the host can't reach us)
+After=roboscope-usb-dhcp.service
+
+[Service]
+ExecStart=/bin/bash /usr/local/lib/roboscope/usb-link-watchdog.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

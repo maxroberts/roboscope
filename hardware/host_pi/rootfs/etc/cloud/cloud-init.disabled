@@ -1,0 +1,5 @@
+# roboscope host Pi: cloud-init off. It applies the Imager's settings on a fresh card's
+# first boot (before this file exists) and afterwards only costs boot time (~2.5 min of
+# the 3B+'s first boot was cloud-init, 2026-11-26).
+# cloud-init checks only that this file exists; the text is for people.
+# Deployed from the roboscope repo (hardware/host_pi/rootfs); edit it there, not on the Pi.

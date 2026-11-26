@@ -549,14 +549,23 @@ answer):
 - **Recovery:** after restarting NetworkManager or the DHCP service, the link was
   back in ~3 s. After reloading `g_ether` it was back in ~6 s.
 
+**Cold power-up (2026-11-26, our config):** the Zero was unplugged and replugged into
+the Mac's port. That's 1 of 1 boots OK:
+- Times from when monitoring started, shortly after the replug:
+  - the Mac's interface appeared at ~29 s;
+  - USB SSH and Wi-Fi SSH both worked at ~71 s.
+- Boot took 1 min 16.3 s.
+- The host got 10.12.194.2, and `ip_forward=0`.
+- No dwc2 `GOUTNAKEFF` timeout appeared in dmesg.
+
 **Open:**
-- The one-way first boot hasn't recurred in 22 boots. Its cause is unknown, and two
-  conditions of that boot were never repeated: the stock config, and a cold power-up
-  from the Mac's port. Every later boot was a warm reboot.
+- The one-way first boot hasn't recurred in 23 boots. Its cause is unknown.
+  - The cold power-up (above) didn't reproduce it.
+  - So the remaining unrepeated condition is the stock `rpi-usb-gadget` config.
+  - One cold boot is a small sample.
 - If it recurs, the signature is Zero `usb0` rx_packets stuck while the host's
   packets-out count rises. Reloading `g_ether` cleared it.
-- Not yet tested: a cold power-up (unplug and replug), and a Pi (the 3B+) as the
-  host.
+- A Pi (the 3B+) as the host: the link works (2026-11-26 entry below).
 
 **3B+ SD card** (32 GB, named "test"; f3 v10 `f3write` + `f3read` on the Mac):
 - 29.61 GB written and verified, 0 sectors lost, corrupted, changed or overwritten.
@@ -564,3 +573,237 @@ answer):
 - Reads ran at 44 MB/s, steady.
 - Writes averaged 4.6 MB/s, with a minimum of 0.26 MB/s, over 1 h 49 min. The card
   is sound but slow to write.
+
+**History of the "test" card:** it is the card from the original Pi that went
+"read-only" (configuration changes and uploaded files didn't survive between
+sessions). It passed f3 above, so it accepts and keeps writes in the Mac. That cause was
+never found. Candidates: a read-only overlay (the old OS is gone, so this can't be
+checked), or low voltage. The 3B+ entry below found low voltage on every charger tried.
+
+## 2026-11-26: host Pi (3B+) bring-up and its power supply
+
+**Second SD card, for comparison** (31 GB, Raspberry Pi OS Buster from 2019 with a
+7.7 GB root partition and 23 GB unpartitioned): a 150 MiB file in the boot partition's
+free space, written and read with the Mac's cache bypassed (`F_NOCACHE`), then deleted.
+- Sequential write 12.6 MB/s, read 30.9 MB/s.
+- 4 KiB random: 374 reads per second; 223 writes per second, each flushed.
+- A short test can flatter writes (cards have fast buffers), so 12.6 MB/s is a best
+  case. Not used: the 3B+ runs from the "test" card.
+- Its boot config has no read-only overlay.
+
+**3B+ setup:** Raspberry Pi OS Lite 64-bit, Trixie, kernel 6.18.50+rpt-rpi-v8,
+hostname `roboscope` (192.168.0.197). Python 3.13.5. 905 MiB RAM.
+- First boot took 4 min 12 s, mostly cloud-init's one-time setup; later boots took
+  1 min 5 s.
+- The root filesystem grew to 29 GB on first boot. No SD or filesystem errors in the
+  kernel log. Changes made on first boot (hostname, user, resize, cloud-init done) have
+  survived about 5 unclean power cuts.
+- Attached by USB: the Uno (`/dev/ttyACM0`, `max` already in `dialout`) and the camera
+  Zero.
+
+**Zero ↔ 3B+ USB link:** it worked without setup on the first boot. The 3B+ got
+10.12.194.2 from the Zero's DHCP, with a round trip of 0.42 ms and no loss (5 pings).
+On later boots, the 3B+'s `usb0` was left with no address. It boots faster than the
+Zero, so NetworkManager likely gave up on DHCP before the Zero's dnsmasq was up (not
+confirmed from logs). The host-Pi setup now gives it a static 10.12.194.2
+(`hardware/host_pi`).
+
+**The one-way failure recurred** (first seen 2026-11-25 on the Mac):
+- **When:** after both Pis were powered up together on the bench supply (~06:40), with
+  the Zero powered from the 3B+'s USB port.
+- **What happened:**
+  - The Zero enumerated normally (no `GOUTNAKEFF` or other dwc2 error in its dmesg).
+  - About 3 minutes later the 3B+'s `cdc_ether` logged
+    `NETDEV WATCHDOG: transmit queue 0 timed out` (06:43, 06:50, 06:52).
+  - Counters at 07:06: the 3B+ had received 30 packets with no errors, and sent 3,
+    with 180 transmit errors and 13 dropped. The Zero had received 1 and sent 30.
+    So host → Zero traffic was dead, and Zero → host worked.
+- **A host-side reset doesn't fix it.** De-authorizing and re-authorizing the device on
+  the 3B+ (`/sys/bus/usb/devices/1-1.1.3/authorized`) failed:
+  `can't set config #1, error -110`. The gadget didn't answer, so the stuck end is the
+  Zero's.
+- **A Zero-side reset does.** `modprobe -r g_ether; modprobe g_ether` on the Zero (over
+  Wi-Fi) brought it back in ~10 s. Ping 5/5 at 0.48 ms; SSH from the 3B+ works, and
+  the static address came back by itself.
+- **Pattern so far:** both failures came at a cold power-up with the Zero powered
+  through its data port from the host; 21 warm reboots all worked, and so did 1 Mac
+  cold power-up. The 3B+ was also short of voltage at the time. Not yet known: whether
+  low voltage, the ordering of power-up, or a dwc2 bug causes it.
+- **Not a fix, but a mitigation to consider:** a watchdog on the Zero that reloads
+  `g_ether` when `usb0`'s receive count stays flat while the link is up.
+
+**roboscope on the 3B+:** `uv sync --dev` installed 46 packages from aarch64 wheels in
+55 s (no compiling). `uv run pytest`: 102 of 103 passed in 5 min 10 s, against 26 s on
+the Mac.
+- The one failure was a timing assumption in `test_idle_mode_switches_and_wakes`,
+  fixed in the test.
+- During the run, `get_throttled` showed no under-voltage (159 readings, ~2 s apart):
+  normal workloads stay above the threshold, unlike 4-core busy loops.
+
+**Power.** `vcgencmd get_throttled` was `0x50005` (under-voltage now, and throttled):
+- The firmware sets the under-voltage bit when the supply falls below about 4.63 V
+  *(threshold as commonly cited; not verified against Raspberry Pi documentation)*.
+  It only says below or above, not by how much.
+- While it is set, the CPU is held at 600 MHz instead of 1.4 GHz.
+- The kernel logs "Undervoltage detected" / "Voltage normalised".
+
+Measurements:
+- **Idle and load:** idle is the Pi doing nothing. Load is 4 shell busy-loops for
+  30–120 s; they touch little memory and no radio, so this understates a real workload.
+- **"% low":** the share of `get_throttled` readings with the under-voltage bit set,
+  sampled every 3 s (rows 1–5) or at 5 Hz.
+- **Pin 2:** the multimeter on GPIO pin 2 (5 V) against a port shell, which reads an
+  average.
+
+| # | Supply | Attached | Idle % low | Load % low | Pin 2 |
+|---|---|---|---|---|---|
+| 1 | First supply | Zero, Uno, keyboard receiver | 100 (10/10) | – | – |
+| 2 | Second charger + cable | Zero, Uno, receiver | 70 (7/10) | – | – |
+| 3 | Second charger | Zero, Uno | 20 (4/20) | – | – |
+| 4 | Second charger | Zero | 15 (3/20) | – | – |
+| 5 | Second charger | nothing | 5 (1/20) | 100 (14/14) | – |
+| 6 | Second charger | Zero, Uno | 22 | 99 | – |
+| 7 | Third charger | Zero, Uno | 38 | 96 | – |
+| 8 | Bench supply, 5.10 V, 2.5 A limit | Zero, Uno | 30 | 97 | – |
+| 9 | Bench supply, 5.25 V | Zero, Uno | 0 | 94; 89 over 2 min | ~5.0 V idle, ~4.9 V load |
+| 10 | Original brick | Zero, Uno | – | 96 | ~4.7 V (taken during the run, probably the load phase) |
+
+- In row 5 (the Pi alone, under load), the CPU sat at 600 MHz at 48–53 °C. The
+  slowdown came from voltage, not heat.
+- Row 10's idle phase got only 2 samples, because the clock stepped mid-run.
+- The charger in rows 2–6 was later found to output far too low a voltage (seen on
+  the user's meter).
+- The Pi rebooted uncleanly around 06:10, between rows 5 and 6. Most likely it browned out
+  as the Zero and Uno were plugged back in, but the journal is volatile, so this is
+  unconfirmed.
+- During provisioning (apt, Wi-Fi downloads, CPU at 1.4 GHz with the bit clear), the
+  bench supply showed **over 1 A**, more than during the busy-loop tests. Those had held
+  the CPU at 600 MHz, which caps its draw.
+
+Reading the results:
+- **The flag overstates the time spent low.** At 5.25 V the meter averaged ~4.9 V
+  under load, above 4.63 V, yet the flag was set ~90% of the time. The likely cause:
+  short dips while the CPU draws current in bursts, with the bit held between dips.
+  The holding is inferred, not documented. Confirming the dips' depth needs a meter's
+  MIN/MAX mode or a scope.
+- **The flag saturates under load for every supply.** It can't rank supplies; the
+  meter can.
+- **The Zero and the Uno are minor loads compared with the supply path.** Removing
+  them changed idle dips from 4/20 to 1/20, but the Pi alone still failed under load.
+
+Upshots (user's, 2026-11-26):
+- There is a meaningful voltage drop from the supply to the GPIO pins: at least
+  0.25 V (5.25 V set, ~5.0 V at pin 2 at idle, ~4.9 V under load).
+- Wall power bricks are likely too low in voltage for this.
+- The wires in micro-USB cables are very thin.
+- Look into powering the Uno and the Zero through some kind of powered USB hub.
+
+Decisions for now:
+- Run the 3B+ from the bench supply at 5.25 V and accept the residual risk: SD writes
+  during dips, and the CPU slowed under load. A better power solution is being worked
+  out in parallel.
+- The Uno stays on the Pi's USB power for now. Watch `get_throttled` and the kernel's
+  under-voltage messages during Uno and mount operations.
+
+**USB link watchdog (camera Pi, `roboscope-usb-watchdog.service`):**
+- **How it works:** every 10 s, while a host has the gadget configured, the Zero pings
+  10.12.194.2 over `usb0`. After 3 misses it reloads `g_ether`.
+- **Backoff:** the wait after a reload is 60 s, doubling up to 30 min while the link
+  stays dead, and resetting on any reply.
+- **Tests:**
+  1. Healthy link for ~4 min: no action.
+  2. The 3B+'s `usb0` taken down: detected after 35 s, and the 3B+ could reach the
+     Zero again 45 s after the failure began.
+  3. The 3B+'s end left unconfigured for 5 min: reloads at 07:30:35, 07:32:13 and
+     07:34:50, with waits of 60, 120 and 240 s. So it backs off rather than looping.
+
+**Cold power-ups with the watchdog** (3B+ USB log times; the Zero's own clock is wrong
+until NTP):
+
+| Power-up | Link at first | Watchdog | 3B+ → Zero SSH works |
+|---|---|---|---|
+| Zero replug 1 (enumerated 08:19:23) | one-way | reload 08:20:24 | 08:20:31 |
+| Zero replug 2 (08:23:50) | one-way | reload 08:24:51 | 08:25:03 |
+| Zero replug 3 (08:26:16) | one-way | reload 08:27:17 | 08:27:27 |
+| Zero replug 4 | one-way | reload | 08:30:32 |
+| Full power cycle 1, mount off, Uno unplugged | one-way | reload | 09:19:44 |
+| Full power cycle 2, same | **worked** | none | 09:24:07 |
+
+- **The signature is identical every time:** the Zero's `usb0` has rx=1 (tx 25–39),
+  then nothing more arrives. The reload fixed every case, giving a working link
+  ~60–70 s after enumeration.
+- **Score so far:** 7 of 9 cold power-ups came up one-way (counting the first Mac
+  boot, the first 3B+ power-up, these 6, and 1 clean Mac cold power-up). Warm
+  reboots: 0 of 21.
+- **Not caused by low voltage:** full power cycle 1 failed with `throttled=0x0` (no
+  under-voltage since boot).
+- Replugging the Zero does cause a 3B+ under-voltage event within a few seconds,
+  likely the Zero's inrush current.
+- Hypothesis at this point: the early `modules-load` load of `g_ether` (before the
+  controller exists) was the cause. It was tested below and rejected as the sole cause.
+
+**3B+ after full provisioning** (persistent journal, Bluetooth off, netplan and
+cloud-init gone):
+- Boot takes **18.3 s** (5.6 s kernel + 12.6 s userspace), down from 1 min 5 s.
+- The persistence marker written at 06:41:55 survived both full power cuts.
+- `get_throttled` read `0x0` after both boots. The mount was off and the Uno unplugged
+  for these, so the Pi's load was lower.
+
+
+## 2026-11-26 late morning: one-way USB link root cause and fix
+
+**Test method:** each cycle is a real cold power-up of the Zero, made without touching
+cables:
+- `uhubctl -l 1-1 -p 2 -a off`, 8 s, then `on`. On the 3B+ this switches power to all
+  its USB ports together; port-level switching on hub 1-1.1 did *not* cut power (the
+  Zero kept its boot).
+- So the Uno must be unplugged during these tests; the mount was off.
+- **Pass:** the 3B+ can ssh to the Zero over USB (10.12.194.1).
+- **Fail:** the Zero's watchdog had to reload `g_ether`.
+- `uhubctl` is installed on the 3B+ by `hardware/host_pi/provision.sh`.
+
+**Results** ("gap" is from the gadget binding, when the host enumerates it and can
+send, to when the Zero opens `usb0`):
+
+| Zero setup | Gap | Cold power-ups failed |
+|---|---|---|
+| `g_ether` from modules-load.d (binds ~42 s); NetworkManager opens `usb0` | ~23 s | 3 of 5 (10 of 14 with the earlier manual power-ups, 7 of 9) |
+| `g_ether` loaded by udev once the controller exists (binds ~50 s); NetworkManager opens `usb0` | ~13 s | 4 of 8 |
+| modules-load.d + udev rule that opens `usb0` when it appears | ~12 s (udev busy at boot) | 5 of 10 |
+| udev load + the same open-on-appear rule | ~5 s | 0 of 11 |
+| **udev rule that loads `g_ether` and opens `usb0` in one command (kept)** | **0.8–1.2 s** | **0 of 12** |
+
+- With the fix, every cold power-up had a working link 91–96 s after power-on, against
+  ~120 s when the watchdog had to step in.
+- Warm reboots with the fix: 5 of 5 clean (no watchdog action), at 102–104 s after
+  the reboot command.
+- No 3B+ under-voltage events during any of these runs.
+
+**Conclusion:**
+- **What matters:** how soon the Zero opens `usb0` after the host enumerates the gadget.
+  With `usb0` open within ~5 s: 0 of 23 failed. Opened 12–23 s later: 19 of 32 failed
+  (all configurations, including the manual power-ups; the first Mac boot was on the
+  stock `rpi-usb-gadget` setup).
+- **Earlier load alone doesn't matter:** loading `g_ether` before the controller exists
+  is fine on its own.
+- **Why warm reboots never failed:** timing alone may explain it, since boot ordering
+  differs on a warm reboot, but this wasn't checked.
+- **Likely mechanism (not proven):**
+  - Linux's `usbnet` host driver times out its transmit queue after 5 s (seen on the
+    3B+ as `NETDEV WATCHDOG: transmit queue 0 timed out`) and cancels its pending sends.
+  - Cancelling an OUT transfer that the Zero is still NAKing, because no receive buffer
+    is queued while `usb0` is down, can leave dwc2's OUT endpoint stuck. The Zero then
+    receives 1 frame and nothing more.
+  - The `GOUTNAKEFF` / `EPDisable` timeouts appear only when `g_ether` is unloaded from
+    the stuck endpoint.
+  - The Mac failure (2026-11-25) presumably had the same cause.
+
+**Kept in `hardware/camera_pi/rootfs`:**
+- `etc/udev/rules.d/87-roboscope-gadget-load.rules`: when UDC `20980000.usb` appears,
+  `modprobe g_ether && ip link set usb0 up`, logged as `roboscope-gadget`.
+- `88-roboscope-usb0-up-early.rules`: opens `usb0` whenever it appears, for other load
+  paths such as the watchdog's reload.
+- The modules-load.d file is removed. The watchdog stays as a safety net.
+
+**Not yet tested:** the fix with the Mac as host (cold plug), and with the Uno attached
+to the 3B+.

@@ -14,10 +14,12 @@ edit config on the Pi directly; edit it here and redeploy.
 | `rootfs/etc/apt/apt.conf.d/20auto-upgrades` | Daily apt update + unattended-upgrade. |
 | `rootfs/etc/apt/apt.conf.d/52roboscope-unattended-upgrades` | Lets unattended-upgrades install from the Raspbian and Raspberry Pi origins (the stock config only matches Debian's, so it would upgrade nothing). No automatic reboot. |
 | `rootfs/etc/systemd/system/roboscope-camera.service` | Runs `python3 -m roboscope_camera.server --source pi` as `max` on 127.0.0.1:47623 (= `client.PORT`), restart on failure. |
-| `rootfs/etc/modules-load.d/roboscope-usb-gadget.conf`, `rootfs/etc/modprobe.d/g_ether.conf` | Load the USB Ethernet gadget (`g_ether`) at boot, with fixed MACs (Pi end `02:72:62:00:00:01`, host end `02:72:62:00:00:02`). |
+| `rootfs/etc/udev/rules.d/87-roboscope-gadget-load.rules`, `rootfs/etc/modprobe.d/g_ether.conf` | Load the USB Ethernet gadget (`g_ether`) once the USB controller appears, **and open `usb0` in the same step**, with fixed MACs (Pi end `02:72:62:00:00:01`, host end `02:72:62:00:00:02`). Opening `usb0` more than a few seconds after the host enumerates the gadget often left the link one-way after a cold power-up; see the USB link section. |
+| `rootfs/etc/udev/rules.d/88-roboscope-usb0-up-early.rules` | Opens `usb0` whenever it appears, for other load paths (the watchdog's reload, a manual `modprobe`). |
 | `rootfs/etc/NetworkManager/system-connections/roboscope-usb0.nmconnection` | `usb0`: static 10.12.194.1/28, no gateway. Installed mode 600. |
 | `rootfs/etc/udev/rules.d/86-roboscope-usb0-managed.rules` | Lets NetworkManager manage `usb0`. Its own `85-nm-unmanaged.rules` ignores every USB gadget interface, which left the link down on every boot. |
 | `rootfs/etc/systemd/system/roboscope-usb-dhcp.service` | dnsmasq, DHCP only on `usb0`: gives the host 10.12.194.2, no router, no DNS. Replaces NetworkManager's "shared" mode, which turns on IP forwarding and NAT. |
+| `rootfs/etc/systemd/system/roboscope-usb-watchdog.service`, `rootfs/usr/local/lib/roboscope/usb-link-watchdog.sh` | USB link watchdog. Every 10 s, while a host has the gadget configured, it pings 10.12.194.2. After 3 misses it reloads `g_ether`, then backs off (60 s, doubling to 30 min) while the link stays dead. It's a safety net: since rule 87, no cold power-up has needed it (0 of 12). |
 | `rootfs/etc/rpi/swap.conf.d/90-roboscope.conf` | Swap to zram only. The default swap file was re-`mkswap`ed on every boot (~21 s). |
 | `rootfs/etc/cloud/cloud-init.disabled` | cloud-init off after provisioning (~45 s per boot). A fresh card doesn't have this file, so the Imager's first-boot setup still runs. |
 | (from `src/roboscope/camera/`) | The camera server code. Not kept here: the deploy script copies it from the package to the Pi as `roboscope_camera/`. |
@@ -66,6 +68,17 @@ macOS and Linux). Wi-Fi stays up for management and updates.
 - Pi: `10.12.194.1` (`ssh max@10.12.194.1`, same host key as over Wi-Fi). Host:
   always `10.12.194.2`, with no gateway, so its internet route is unaffected.
 - No IP forwarding or NAT on the Pi.
+- **Fixed issue: one-way link after a cold power-up.**
+  - **Symptom:** the host's frames stopped reaching the Zero, in 19 of 32 cold
+    power-ups when `usb0` was opened 12–23 s after the host enumerated the gadget.
+  - **Fix:** rule 87 opens `usb0` within ~1 s. Since then, 0 of 12 cold power-ups
+    have failed, and 0 of 11 with a ~5 s gap.
+  - **Likely mechanism (not proven):** the host's 5 s transmit timeout cancels sends
+    while the Zero is still refusing them, which wedges the Zero's receive endpoint.
+  - The watchdog stays as a safety net.
+  - **Link timing:** working ~90–95 s after a cold power-on, all with the 3B+ as host.
+    Not yet re-tested with the Mac as host.
+  - Details: `documentation/hardware_findings.md`, "2026-11-26 late morning".
 - Measured Zero → Mac: plain TCP 14 MB/s (the Zero's CPU is the limit), SSH 4.5 MB/s,
   round trip 0.8 ms. Over Wi-Fi: 0.8–2.6 MB/s plain, ~0.5 MB/s SSH. Details and the
   reboot tests: `documentation/hardware_findings.md` ("2026-11-25 evening: camera Pi USB link…").

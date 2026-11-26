@@ -16,10 +16,17 @@ experimental results are in `documentation/hardware_findings.md`.
   `scripts/deploy_camera_pi.sh`. Change config there, never only on the Pi. sudo
   needs the user's password; never write it into a file. Also reachable over a USB
   gadget link (cable in the Zero's "USB" port; Pi 10.12.194.1, host 10.12.194.2);
-  deploy over Wi-Fi by IP, since provisioning can drop the USB link.
+  deploy over Wi-Fi by IP, since provisioning can drop the USB link. The link used to come
+  up one-way after cold power-ups; that's fixed by opening `usb0` the moment `g_ether`
+  loads (udev rule 87; hardware_findings.md, 2026-11-26). `roboscope-usb-watchdog` on
+  the Zero stays as a safety net.
 - Motor control: Arduino Uno on the HBX port (firmware/mount_controller), USB to the
   host; the handbox is no longer used. Wiring: documentation/wiring_hbx_uno.md.
-- Host computer (planned): Pi 3B+, 64-bit Pi OS. Planned solver camera: Pi HQ + 16–25 mm lens.
+- Host computer: Pi 3B+ `max@roboscope.local` (192.168.0.197), Pi OS Lite 64-bit
+  Trixie, SSH keys only. Config in `hardware/host_pi/`, applied (with the code sync) by
+  `scripts/deploy_host_pi.sh`. Uno at `/dev/ttyACM0`, camera Zero at 10.12.194.1 over
+  USB. Power is marginal (bench supply at 5.25 V): check `vcgencmd get_throttled`
+  during Uno or mount work. Planned solver camera: Pi HQ + 16–25 mm lens.
 - Serial link that works: the FTDI FT232R cable (`/dev/cu.usbserial-A9IDYQVP`) into the
   AudioStar's own RS-232 jack. AudioStar firmware A4S2 (Sep 21 2018). 800/800 queries
   OK, ~60 ms per query (2026-11-24). The second cable (PL2303) is untested on the
@@ -39,6 +46,9 @@ experimental results are in `documentation/hardware_findings.md`.
   server (`src/roboscope/camera`) to the camera Pi and run its idempotent
   `provision.sh` (sudo password prompt). Redeploy after any change to
   `src/roboscope/camera`.
+- `scripts/deploy_host_pi.sh [--code-only] [host] [camera_host]`: provision the 3B+
+  from `hardware/host_pi/` (sudo password prompt), link it to the Zero, sync the repo
+  to `~/roboscope` there and `uv sync`. `--code-only` syncs code only.
 - `uv run python scripts/camera_view.py [--synthetic]`: camera live view and settings in
   the browser, via an SSH tunnel. The server is `roboscope-camera.service` on the Pi.
 - `roboscope.camera` also runs on the Pi as `roboscope_camera`: relative imports only,

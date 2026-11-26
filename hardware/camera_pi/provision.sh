@@ -15,12 +15,20 @@
 #      - etc/apt/apt.conf.d/52roboscope-unattended-upgrades: allow Raspbian/RPi origins.
 #      - etc/systemd/system/roboscope-camera.service: the camera server.
 #      - USB gadget link to the host computer (USB Ethernet over the Zero's data port):
-#        etc/modules-load.d/roboscope-usb-gadget.conf (load g_ether),
+#        etc/udev/rules.d/87-roboscope-gadget-load.rules (load g_ether once the USB
+#        controller exists and bring usb0 up at once: opening usb0 late after a cold
+#        power-up often left the link one-way; see that rule),
+#        etc/udev/rules.d/88-roboscope-usb0-up-early.rules (usb0 up as soon as it
+#        appears, for any other load path such as the watchdog's reload),
 #        etc/modprobe.d/g_ether.conf (fixed MACs),
 #        etc/NetworkManager/system-connections/roboscope-usb0.nmconnection (static
 #        10.12.194.1/28), etc/systemd/system/roboscope-usb-dhcp.service (gives the
 #        host 10.12.194.2, no gateway), etc/udev/rules.d/86-roboscope-usb0-managed.rules
 #        (NetworkManager ignores gadget interfaces unless told otherwise).
+#        etc/systemd/system/roboscope-usb-watchdog.service runs
+#        usr/local/lib/roboscope/usb-link-watchdog.sh, which reloads g_ether when the
+#        host stops reaching the Pi (a safety net; the one-way link it was written for
+#        is fixed by rule 87).
 #      - Faster boot: etc/rpi/swap.conf.d/90-roboscope.conf (zram only, no swap file),
 #        etc/cloud/cloud-init.disabled (cloud-init only matters on a fresh card).
 #   3. Validates the sshd config before reloading sshd (a broken config is removed, so
@@ -28,7 +36,8 @@
 #   4. Disables Bluetooth (service off now; dtoverlay=disable-bt from the next boot).
 #   5. USB gadget: turns off the stock rpi-usb-gadget setup if it is on (its "shared"
 #      mode enables IP forwarding + NAT), adds dtoverlay=dwc2,dr_mode=peripheral, and
-#      enables roboscope-usb-dhcp.service. The link comes up from the next boot.
+#      enables roboscope-usb-dhcp.service and roboscope-usb-watchdog.service. The link
+#      comes up from the next boot.
 #   6. Moves the Wi-Fi connection out of netplan into a NetworkManager keyfile (see the
 #      comment at that step: it cost ~55 s of every boot).
 #   7. Installs the camera server code (staged roboscope_camera/ → /opt/roboscope) and
@@ -88,6 +97,9 @@ if ! grep -q '^dtoverlay=disable-bt' "$CFG"; then
 fi
 
 echo "== USB gadget: roboscope setup"
+# g_ether is loaded by udev rule 87 once the USB controller exists. Remove the earlier
+# modules-load.d file, which loaded it before the controller was ready.
+rm -f /etc/modules-load.d/roboscope-usb-gadget.conf
 # Peripheral mode for the Zero's USB data port (the one nearest the mini-HDMI).
 if ! grep -q '^dtoverlay=dwc2,dr_mode=peripheral' "$CFG"; then
     printf '\n# roboscope: USB gadget link to the host (deployed by provision.sh)\n[all]\ndtoverlay=dwc2,dr_mode=peripheral\n' >> "$CFG"
@@ -95,6 +107,8 @@ if ! grep -q '^dtoverlay=dwc2,dr_mode=peripheral' "$CFG"; then
 fi
 systemctl enable roboscope-usb-dhcp.service >/dev/null 2>&1
 systemctl restart roboscope-usb-dhcp.service
+systemctl enable roboscope-usb-watchdog.service >/dev/null 2>&1
+systemctl restart roboscope-usb-watchdog.service
 nmcli connection reload
 # Apply the udev rule that lets NetworkManager manage usb0 (it ignores gadget
 # interfaces by default), then bring usb0 up now if the gadget is already loaded
