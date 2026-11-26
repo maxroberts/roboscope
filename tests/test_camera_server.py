@@ -8,7 +8,9 @@ Details:
       - freshness: after the star moves or the exposure changes, the next locate
         reflects it;
       - settings validation and clamping;
-      - the browser endpoints (page, snapshot, MJPEG stream).
+      - the browser endpoints (page, snapshot, MJPEG stream);
+      - idle mode switching and waking;
+      - `client.pick_host`'s route choice (USB link vs Wi-Fi), with the TCP probe faked.
 """
 
 import urllib.request
@@ -114,3 +116,29 @@ def test_idle_mode_switches_and_wakes(cam, monkeypatch):
     monkeypatch.setattr(server_mod, "IDLE_AFTER_S", 60.0)
     assert client.locate() is not None                # a request wakes it ...
     assert client.status()["idle"] is False and src.idle is False   # ... at once
+
+
+def test_pick_host_prefers_usb_link(monkeypatch):
+    """pick_host: the USB address when its SSH port accepts a connection, else mDNS name."""
+    import socket
+
+    import roboscope.camera.client as client_mod
+
+    class _Conn:
+        def close(self):
+            pass
+
+    calls = []
+
+    def ok(addr, timeout):
+        calls.append(addr)
+        return _Conn()
+
+    def fail(addr, timeout):
+        raise OSError("no route")
+
+    monkeypatch.setattr(socket, "create_connection", ok)
+    assert client_mod.pick_host() == client_mod.USB_HOST
+    assert calls == [(client_mod.USB_HOST, 22)]
+    monkeypatch.setattr(socket, "create_connection", fail)
+    assert client_mod.pick_host() == client_mod.DEFAULT_HOST

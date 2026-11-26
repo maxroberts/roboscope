@@ -4,7 +4,9 @@ Details:
     The narrow camera (Pi Zero W + OV5647 at the focuser) is owned by one process on
     the Pi, `server.py`, which runs there as roboscope-camera.service. It listens on
     the Pi's loopback interface only, and everything reaches it through an SSH tunnel:
-      - `client.py`: `connect()` opens the tunnel and returns a `CameraClient`.
+      - `client.py`: `connect()` opens the tunnel and returns a `CameraClient`. It goes
+        over the Zero's USB link (10.12.194.1) when present, else Wi-Fi
+        (`pick_host`).
         `CameraClient.locate()` is the finder that `align.AlignmentSession` expects.
         It returns full-sensor (x, y) pixels of the star in a frame taken after the
         call, or None.
@@ -37,9 +39,13 @@ Details:
         the next request wakes it (first locate ≈ 0.9 s).
     The browser preview is rendered and JPEG-encoded on the Pi. Shipping raw frames
     over Wi-Fi for the host to render would cost the Pi more: SSH over Wi-Fi moves
-    ~0.5–1.5 MB/s, and a raw frame is ~8× the size of a preview JPEG. Over the USB link
-    (hardware/camera_pi/README.md) plain TCP reaches 14 MB/s, which may reverse this;
-    the server doesn't listen on that link yet.
+    ~0.5–1.5 MB/s, and a raw frame is ~8× the size of a preview JPEG.
+    - **Over the USB link (SSH tunnel), measured from the 3B+ on 2026-11-26:** a raw
+      frame takes ~0.35 s (1.8 MB/s; the Zero's CPU limits SSH), and `locate`
+      ~0.3 s.
+    - **The open question:** this could change where previews are rendered. Plain TCP
+      on the link reaches 14 MB/s, but the server doesn't listen there; it stays
+      loopback-only.
 """
 
 from .client import CameraClient, CameraError, SshTunnel, connect

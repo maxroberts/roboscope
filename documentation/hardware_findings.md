@@ -807,3 +807,40 @@ send, to when the Zero opens `usb0`):
 
 **Not yet tested:** the fix with the Mac as host (cold plug), and with the Uno attached
 to the 3B+.
+
+## 2026-11-26 afternoon: camera over the USB link
+
+**Approach:** keep the camera server on the Zero's loopback and reach it through an SSH
+tunnel over the USB link (`connect(host="10.12.194.1")`). This needed no server change
+and exposes nothing new on either network.
+
+**Measured from the 3B+** (`CameraClient`, binned frames, no optics so `found=False`):
+
+| | USB (SSH tunnel) | Wi-Fi (SSH tunnel) |
+|---|---|---|
+| Tunnel setup | 0.6–1.0 s | 1.8 s |
+| `status` | 53–163 ms | 100–218 ms |
+| `locate` | 0.28–0.35 s (median 0.30 s) | 0.48–0.65 s |
+| Raw frame (0.63 MB) | 0.31–0.41 s (median 0.40 s, ~1.6 MB/s) | 4.1–22 s (0.2 MB/s at best) |
+
+- Server at 10 fps throughout. No 3B+ under-voltage (`0x0`).
+- SSH over USB is limited by the Zero's CPU, which is also running capture; plain TCP
+  reached 14 MB/s on 2026-11-25.
+- **Route choice:** `client.pick_host()` tries a 0.5 s TCP connect to 10.12.194.1:22
+  and falls back to `roboscopeCam.local`. `connect()` and `camera_view.py` use it when
+  no host is given.
+  - The 3B+ picked USB.
+  - The Mac, with the Zero not plugged in, picked Wi-Fi after the 0.5 s probe.
+- **Waking from idle:** frames during the first few seconds after the server leaves
+  idle mode take 0.7–1.0 s, while capture speeds back up from 1 fps.
+
+**First request after a gap took ~7 s; fixed with linger:**
+- **Symptom:** the first `status` through a new tunnel took 6.8 s when no SSH session
+  had been open for a while. A second tunnel straight after took 0.44 s.
+- **Not the server:** on the Zero itself, `status` after idle took 0.1–0.6 s.
+- **Cause:** with systemd linger off, the Zero stops `max`'s user manager
+  (`user@1000.service`) after the last session closes and starts it again at the next
+  login: 3.1 s and >4 s of CPU. An SSH login after a 60 s gap took 5.2 s; the next one
+  took 1.3 s.
+- **Fix:** `loginctl enable-linger max` (camera Pi `provision.sh`). After a 60 s gap,
+  logins take 1.05 s both times, and the tunnel's first `status` 0.38 s.

@@ -40,7 +40,11 @@
 #      comes up from the next boot.
 #   6. Moves the Wi-Fi connection out of netplan into a NetworkManager keyfile (see the
 #      comment at that step: it cost ~55 s of every boot).
-#   7. Installs the camera server code (staged roboscope_camera/ → /opt/roboscope) and
+#   7. Turns on systemd "linger" for the login user ($SUDO_USER, normally max), so their
+#      user manager keeps running between SSH sessions. Without it, the first login
+#      after a gap started user@1000.service from scratch (3.1 s, >4 s CPU on the Zero),
+#      and the camera tunnel's first request waited ~5-7 s for it (2026-11-26).
+#   8. Installs the camera server code (staged roboscope_camera/ → /opt/roboscope) and
 #      (re)starts roboscope-camera.service (unit in rootfs/etc/systemd/system).
 # Reboot is left to the caller; the script prints whether one is needed.
 # Run it over Wi-Fi, not over the USB link: step 5 can drop the USB link mid-run.
@@ -147,6 +151,10 @@ elif [ ${#yamls[@]} -gt 0 ]; then
     echo "  netplan Wi-Fi config found but no generated keyfile; left alone" >&2
 fi
 shopt -u nullglob
+
+echo "== linger"
+loginctl enable-linger "${SUDO_USER:-max}"
+loginctl show-user "${SUDO_USER:-max}" -p Linger
 
 echo "== camera server"
 # Code: src/roboscope/camera from the repo, staged by deploy_camera_pi.sh as

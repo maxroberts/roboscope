@@ -9,7 +9,7 @@ edit config on the Pi directly; edit it here and redeploy.
 
 | Path | What it is |
 |---|---|
-| `provision.sh` | Runs on the Pi as root. Installs packages (incl. the camera stack from apt), copies `rootfs/` over `/`, validates and reloads sshd, disables Bluetooth, sets up the USB gadget link (replacing the stock `rpi-usb-gadget` setup), moves the Wi-Fi connection out of netplan, installs the camera server to `/opt/roboscope` and restarts its service, prints `REBOOT NEEDED` when needed. Idempotent. Run it over Wi-Fi: the USB step can drop the USB link. |
+| `provision.sh` | Runs on the Pi as root. Installs packages (incl. the camera stack from apt), copies `rootfs/` over `/`, validates and reloads sshd, disables Bluetooth, sets up the USB gadget link (replacing the stock `rpi-usb-gadget` setup), moves the Wi-Fi connection out of netplan, turns on systemd linger for `max` (so the first SSH login after a gap isn't ~5 s slower), installs the camera server to `/opt/roboscope` and restarts its service, prints `REBOOT NEEDED` when needed. Idempotent. Run it over Wi-Fi: the USB step can drop the USB link. |
 | `rootfs/etc/ssh/sshd_config.d/10-roboscope-keyonly.conf` | Key-only SSH, no root login (overrides the Imager's `50-cloud-init.conf`). |
 | `rootfs/etc/apt/apt.conf.d/20auto-upgrades` | Daily apt update + unattended-upgrade. |
 | `rootfs/etc/apt/apt.conf.d/52roboscope-unattended-upgrades` | Lets unattended-upgrades install from the Raspbian and Raspberry Pi origins (the stock config only matches Debian's, so it would upgrade nothing). No automatic reboot. |
@@ -82,7 +82,11 @@ macOS and Linux). Wi-Fi stays up for management and updates.
 - Measured Zero → Mac: plain TCP 14 MB/s (the Zero's CPU is the limit), SSH 4.5 MB/s,
   round trip 0.8 ms. Over Wi-Fi: 0.8–2.6 MB/s plain, ~0.5 MB/s SSH. Details and the
   reboot tests: `documentation/hardware_findings.md` ("2026-11-25 evening: camera Pi USB link…").
-- The camera server doesn't listen on the link yet; use it through SSH for now.
+- The camera server still listens only on loopback; reach it through an SSH tunnel over
+  the link. `roboscope.camera.connect()` and `scripts/camera_view.py` pick the USB link
+  automatically when it answers.
+  - Measured from the 3B+ (2026-11-26): raw frame ~0.35 s over USB against 4–22 s over
+    Wi-Fi; `locate` ~0.3 s against 0.5–0.65 s.
 
 ## Camera server
 - `roboscope-camera.service` owns the camera from boot (only one process can). See
