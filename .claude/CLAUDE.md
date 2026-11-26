@@ -33,8 +33,14 @@ experimental results are in `documentation/hardware_findings.md`.
 - `uv run python scripts/sky_now.py --lat .. --lon .. [--local "YYYY-MM-DD HH:MM" --tz ..]`:
   what's up and suggested alignment stars (moves nothing)
 - `uv run pytest`: tests
-- `scripts/deploy_camera_pi.sh [host]`: push `hardware/camera_pi/` config to the camera
-  Pi and run its idempotent `provision.sh` (sudo password prompt).
+- `scripts/deploy_camera_pi.sh [host]`: push `hardware/camera_pi/` config and the camera
+  server (`src/roboscope/camera`) to the camera Pi and run its idempotent
+  `provision.sh` (sudo password prompt). Redeploy after any change to
+  `src/roboscope/camera`.
+- `uv run python scripts/camera_view.py [--synthetic]`: camera live view and settings in
+  the browser, via an SSH tunnel. The server is `roboscope-camera.service` on the Pi.
+- `roboscope.camera` also runs on the Pi as `roboscope_camera`: relative imports only,
+  numpy + stdlib only. Keep numpy work integer-typed there (ARMv6 is slow).
 - `uv run python scripts/probe_mount.py --port <dev> [--repeat N] [-v]`: read-only
   hardware probe and cable test (`-v` logs raw serial bytes).
 - `uv run python scripts/mc_bench_test.py --port /dev/cu.usbmodem113301`: hardware

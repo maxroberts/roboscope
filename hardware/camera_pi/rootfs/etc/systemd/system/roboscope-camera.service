@@ -1,0 +1,18 @@
+# roboscope camera server (src/roboscope/camera/server.py, installed by provision.sh as
+# /opt/roboscope/roboscope_camera). Loopback only: reach it through an SSH tunnel.
+# Port 47623 = roboscope.camera.client.PORT; keep them in sync.
+# Deployed from the roboscope repo (hardware/camera_pi/rootfs); edit it there, not on the Pi.
+[Unit]
+Description=roboscope camera server
+After=network.target
+
+[Service]
+User=max
+Group=video
+WorkingDirectory=/opt/roboscope
+ExecStart=/usr/bin/python3 -m roboscope_camera.server --source pi --host 127.0.0.1 --port 47623
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

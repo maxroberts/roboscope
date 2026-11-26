@@ -7,7 +7,10 @@ the mount's backlash, slip and alignment errors.
 
 **Status:** Stage 1 in progress. Both axes are driven by our own Arduino-based motor
 controller (no handbox): regulated speed, encoder positions and firmware safety limits
-are verified on hardware. Absolute pointing (camera, accelerometer) is not built yet.
+are verified on hardware. The sky model and star alignment work in simulation. The
+camera Pi's server (raw frames, star centroids, browser live view) runs on hardware,
+but hasn't seen a star yet because no optics are attached. Next: the mount adapter that
+connects alignment to the real motors.
 See [documentation/PLAN.md](documentation/PLAN.md) and
 [documentation/hardware_findings.md](documentation/hardware_findings.md).
 
@@ -39,6 +42,22 @@ From Python:
 from roboscope.mount import Mount
 with Mount.connect("/dev/tty.usbserial-XXXX") as m:
     print(m.info(), m.radec(), m.altaz())
+```
+
+Camera Pi live view and settings in the browser (through an SSH tunnel; the camera
+server runs on the Pi as a service):
+```sh
+uv run python scripts/camera_view.py            # http://127.0.0.1:47623/
+uv run python scripts/camera_view.py --synthetic  # simulated camera, no Pi needed
+scripts/deploy_camera_pi.sh                      # push Pi config + camera server
+```
+
+From Python:
+```python
+from roboscope.camera import connect
+with connect() as cam:                     # SSH tunnel to roboscopeCam.local
+    cam.set(exposure_ms=50, gain=4)
+    print(cam.find_star())                 # centroid in full-sensor px, SNR, ...
 ```
 
 ## Codebase architecture
@@ -93,8 +112,21 @@ with Mount.connect("/dev/tty.usbserial-XXXX") as m:
   - `absorb_scale` folds a sky-fitted scale error into counts/°. Sessions load
     hardware terms from here and keep them fixed, so a nightly alignment only solves
     the setup (zero offsets, tilt).
-- Planned packages: `motion` (backlash-aware moves, hardware adapters), `camera`,
-  `solve`, `safety` (see the plan). The whole package will run on a Raspberry Pi attached to the telescope.
+- `roboscope.camera`: the narrow camera.
+  - The server (`server.py`) runs on the camera Pi as `roboscope-camera.service`. It
+    owns the camera (picamera2, raw 10-bit Bayer, manual exposure/gain, 2×2-summed
+    linear frames) and finds the star there (`starfind.py`, numpy only), so only
+    coordinates cross Wi-Fi. It has an HTTP API (`/api/locate`, `/api/settings`,
+    `/api/frame.npy`, …) and an MJPEG browser UI.
+  - It binds to loopback only. The host reaches it through an SSH tunnel:
+    `CameraClient` (`client.py`), whose `locate()` is `AlignmentSession`'s star
+    finder, and `scripts/camera_view.py` for the browser.
+  - The same files deploy to the Pi as package `roboscope_camera`, so they use relative
+    imports and need only numpy and the stdlib.
+  - `SyntheticSource` simulates the camera for tests and for running the UI without
+    the Pi.
+- Planned packages: `motion` (backlash-aware moves, hardware adapters), `solve`,
+  `safety` (see the plan). The whole package will run on a Raspberry Pi attached to the telescope.
 - `tests/`: pytest suite. Protocol conversions, plus the driver against the simulator.
 - `scripts/probe_mount.py`: read-only hardware probe and cable comparison.
 - `firmware/mount_controller/`: the Uno firmware that replaces the handbox. It is master
@@ -116,9 +148,10 @@ with Mount.connect("/dev/tty.usbserial-XXXX") as m:
 - `hardware/camera_pi/`: the focuser camera's Pi Zero W (`roboscopeCam.local`, Pi OS
   Lite Trixie, OV5647). This folder is the source of truth for its setup: `rootfs/`
   config files plus `provision.sh`, pushed and applied by `scripts/deploy_camera_pi.sh`
-  (key-only SSH, automatic updates, Bluetooth off). Its README covers rebuilding the
-  card and the camera's verified state. `legacy_2019/` holds redacted copies of the
-  old webcam setup. There's no roboscope camera code on the Pi yet.
+  (key-only SSH, automatic updates, Bluetooth off, the camera server and its systemd
+  unit, which runs `roboscope.camera` copied to /opt/roboscope). Its README covers
+  rebuilding the card and the camera's verified state. `legacy_2019/` holds redacted
+  copies of the old webcam setup.
 - `notebooks/`: numbered exploration notebooks for hardware bring-up and experiments.
 - `documentation/`:
   - `PLAN.md`: the staged plan.

@@ -52,6 +52,16 @@ def _m(d: dict | None) -> Measured:
     return Measured(**d) if d else Measured(None)
 
 
+def _dumps(obj, indent: int = 0) -> str:
+    """JSON with nested objects indented, but each all-scalar object (a Measured) on one
+    line. That keeps git diffs of the file to one line per changed measurement."""
+    if isinstance(obj, dict) and any(isinstance(v, (dict, list)) for v in obj.values()):
+        pad = " " * (indent + 2)
+        items = [f"{pad}{json.dumps(k)}: {_dumps(v, indent + 2)}" for k, v in obj.items()]
+        return "{\n" + ",\n".join(items) + "\n" + " " * indent + "}"
+    return json.dumps(obj)
+
+
 class HardwareCalibration:
     """Load, query, update and save the calibration file (see module notes)."""
 
@@ -65,7 +75,8 @@ class HardwareCalibration:
         return cls(json.loads(Path(path).read_text()), Path(path))
 
     def save(self, path: str | Path | None = None) -> None:
-        Path(path or self.path).write_text(json.dumps(self.data, indent=2) + "\n")
+        """Write the file in its compact style (one line per measurement; see _dumps)."""
+        Path(path or self.path).write_text(_dumps(self.data) + "\n")
 
     # -- accessors ----------------------------------------------------------------
 

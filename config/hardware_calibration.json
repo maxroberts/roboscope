@@ -3,58 +3,16 @@
   "instrument": "Meade StarNavigator NG 102 (660 mm f/6.5), motor boards driven by firmware/mount_controller on an Arduino Uno",
   "mount": {
     "counts_per_degree": {
-      "az": {
-        "value": 3085.0,
-        "sigma": 75.0,
-        "date": "2026-11-24",
-        "method": "~148,000-count out-and-back moves read against the azimuth setting circle (48 deg, +-1 deg reading), two repeats; scripts/hbx_large_move.py",
-        "note": "Refine with a sky fit (absorb_scale). See hardware_findings.md 'counts per degree from large moves'."
-      },
-      "alt": {
-        "value": 4230.0,
-        "sigma": 125.0,
-        "date": "2026-11-24",
-        "method": "~148,000-count out-and-back move read against the side angle scale (35 deg, +-1 deg reading); scripts/hbx_large_move.py",
-        "note": "Phone-inclinometer or accelerometer reading would tighten this."
-      }
+      "az": {"value": 3085.0, "sigma": 75.0, "date": "2026-11-24", "method": "~148,000-count out-and-back moves read against the azimuth setting circle (48 deg, +-1 deg reading), two repeats; scripts/hbx_large_move.py", "note": "Refine with a sky fit (absorb_scale). See hardware_findings.md 'counts per degree from large moves'."},
+      "alt": {"value": 4230.0, "sigma": 125.0, "date": "2026-11-24", "method": "~148,000-count out-and-back move read against the side angle scale (35 deg, +-1 deg reading); scripts/hbx_large_move.py", "note": "Phone-inclinometer or accelerometer reading would tighten this."}
     },
     "backlash_counts": {
-      "az": {
-        "value": null,
-        "sigma": null,
-        "date": "",
-        "method": "",
-        "note": "Not measured. Seen as 'significant' by eye and as ~1000 extra encoder counts on reversal at full slew (hardware_findings.md). Measure with camera or accelerometer: approach a target from both directions, compare encoder counts."
-      },
-      "alt": {
-        "value": null,
-        "sigma": null,
-        "date": "",
-        "method": "",
-        "note": "Not measured. Below ~1 deg (side scale, 2026-11-24)."
-      }
+      "az": {"value": null, "sigma": null, "date": "", "method": "", "note": "Not measured. Seen as 'significant' by eye and as ~1000 extra encoder counts on reversal at full slew (hardware_findings.md). Measure with camera or accelerometer: approach a target from both directions, compare encoder counts."},
+      "alt": {"value": null, "sigma": null, "date": "", "method": "", "note": "Not measured. Below ~1 deg (side scale, 2026-11-24)."}
     },
-    "speed_regulation_accuracy_fraction": {
-      "value": 0.015,
-      "sigma": null,
-      "date": "2026-11-24",
-      "method": "commanded vs encoder counts/s at 0.5x-32x sidereal, both axes (hardware_findings.md low-speed sweep)",
-      "note": "Upper bound: at the 100 ms position-sampling resolution."
-    },
-    "max_counts_per_s": {
-      "value": 1300.0,
-      "sigma": null,
-      "date": "2026-11-24",
-      "method": "firmware cap MAX_CPS (firmware/mount_controller)",
-      "note": "Tested up to ~1235 counts/s regulated."
-    },
-    "az_travel_limit_deg": {
-      "value": 45.0,
-      "sigma": null,
-      "date": "2026-11-24",
-      "method": "user rule: cables attached to the telescope",
-      "note": "+- this many degrees from the session start; revisit when cabling is final."
-    }
+    "speed_regulation_accuracy_fraction": {"value": 0.015, "sigma": null, "date": "2026-11-24", "method": "commanded vs encoder counts/s at 0.5x-32x sidereal, both axes (hardware_findings.md low-speed sweep)", "note": "Upper bound: at the 100 ms position-sampling resolution."},
+    "max_counts_per_s": {"value": 1300.0, "sigma": null, "date": "2026-11-24", "method": "firmware cap MAX_CPS (firmware/mount_controller)", "note": "Tested up to ~1235 counts/s regulated."},
+    "az_travel_limit_deg": {"value": 45.0, "sigma": null, "date": "2026-11-24", "method": "user rule: cables attached to the telescope", "note": "+- this many degrees from the session start; revisit when cabling is final."}
   },
   "pointing": {
     "CA": {"value": null, "sigma": null, "date": "", "method": "", "note": "Collimation. Fit from a >=6-star session, then store here."},
@@ -65,17 +23,15 @@
   },
   "cameras": {
     "narrow": {
-      "description": "User's Pi Zero W + Pi camera rig at the NG 102 focuser",
-      "scale_arcsec_px": {"value": null, "sigma": null, "date": "", "method": "", "note": "Expected ~0.35 (v2 module) or ~0.44 (v1) at prime focus; module unconfirmed. Measure: two frames with a known small mount move (counts) between them."},
+      "description": "User's Pi Zero W + Pi Camera v1 (OV5647, 2592x1944, 1.4 um px) for the NG 102 focuser",
+      "scale_arcsec_px": {"value": null, "sigma": null, "date": "", "method": "", "note": "Expected 0.4375 at prime focus (1.4 um / 660 mm), FOV 0.315 x 0.236 deg; not measured. Measure: two frames with a known small mount move (counts) between them."},
       "roll_deg": {"value": null, "sigma": null, "date": "", "method": "", "note": "From the same two-frame calibration (direction of motion in the image)."},
       "flip_x": {"value": null, "sigma": null, "date": "", "method": "", "note": "1 if the image is mirrored (e.g. star diagonal); from an az move vs image direction."},
-      "width_px": {"value": null, "sigma": null, "date": "", "method": "", "note": "Capture resolution used."},
-      "height_px": {"value": null, "sigma": null, "date": "", "method": "", "note": "Capture resolution used."},
+      "width_px": {"value": 2592, "sigma": 0, "date": "2026-11-25", "method": "sensor spec, confirmed by rpicam-hello --list-cameras on the Pi", "note": "Full-sensor pixels: the camera server reports star positions in these units in every sensor mode."},
+      "height_px": {"value": 1944, "sigma": 0, "date": "2026-11-25", "method": "sensor spec, confirmed by rpicam-hello --list-cameras on the Pi", "note": "Full-sensor pixels: the camera server reports star positions in these units in every sensor mode."},
       "boresight_x_px": {"value": null, "sigma": null, "date": "", "method": "", "note": "Pixel defined as 'where the mount points'; default image centre."},
       "boresight_y_px": {"value": null, "sigma": null, "date": "", "method": "", "note": ""}
     }
   },
-  "imu": {
-    "note": "Placeholder: Pololu MinIMU-9 v3 (LSM303D + L3GD20H) planned on the tube in a PLA housing. Store accelerometer zero offsets/scales and magnetometer hard/soft-iron calibration here once mounted."
-  }
+  "imu": {"note": "Placeholder: Pololu MinIMU-9 v3 (LSM303D + L3GD20H) planned on the tube in a PLA housing. Store accelerometer zero offsets/scales and magnetometer hard/soft-iron calibration here once mounted."}
 }

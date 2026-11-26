@@ -7,6 +7,7 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "numpy>=2.5.5",
     "pandas>=3.1.1",
     "pgeocode>=0.5.0",
     "pyserial>=3.5",
@@ -21,4 +22,8 @@ build-backend = "uv_build"
 dev = [
     "ipykernel>=7.4.0",
     "pytest>=9.2.0",
+    "simplejpeg>=1.10.1",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -223,6 +223,21 @@ commands.
   - Next: hardware adapters (MotorController → `goto`/`position`; Pi camera → `locate`),
     camera-frame calibration, backlash handling.
 
+- **Camera Pi rebuilt and camera layer done** (`roboscope.camera`, `hardware/camera_pi/`).
+  - The Pi Zero W was reflashed with Pi OS Lite (Trixie). It's hardened (key-only SSH,
+    automatic updates, Bluetooth off) and configured from the repo with
+    `scripts/deploy_camera_pi.sh`.
+  - The camera server runs on the Pi. It uses raw 10-bit Bayer frames with manual
+    exposure, finds stars on the Pi, and listens on loopback only. It is reached
+    through an SSH tunnel by `CameraClient` (whose `locate()` is align's finder) and by
+    a browser UI (`scripts/camera_view.py`).
+  - Measured: a locate takes ≈ 0.6 s binned and ≈ 1.5 s at full resolution. numpy on
+    the Zero's ARMv6 is slow, so frames stay integer and are binned lazily.
+  - Not yet tested on stars: the camera has no optics in front of it yet.
+  - Next: mount adapter (`goto`/`position`, backlash-consistent approach). Then the
+    camera on the scope for a daytime test (focus, plate scale and roll, backlash
+    from image shifts).
+
 ## 6. Decisions and open questions
 
 Decided (2026-11-24):

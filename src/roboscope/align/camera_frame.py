@@ -10,8 +10,10 @@ Details:
     with u = Δaz·cos(alt), v = Δalt in degrees, and scale in arcsec/px converted to °.
 
     Parameters, measured during camera calibration:
-      - `scale_arcsec_px`: from optics. The NG 102 at prime focus with a v2 Pi camera
-        gives ≈ 0.35″/px; an HQ camera with a 16 mm lens ≈ 20″/px.
+      - `scale_arcsec_px`: from optics. The NG 102 at prime focus with the user's v1
+        Pi camera (OV5647, 1.4 µm pixels) gives ≈ 0.44″/px. An HQ camera with a 16 mm
+        lens gives ≈ 20″/px. The default width/height (3280×2464, a v2 camera) are
+        placeholders; real values come from the calibration file (2592×1944).
       - `roll_deg`: camera rotation about the optical axis.
       - `flip_x`: a mirror image (a star diagonal flips it).
       - `boresight_px`: the pixel the model treats as "where the mount points", usually

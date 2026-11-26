@@ -1,0 +1,134 @@
+<!doctype html>
+<!--
+  roboscope camera viewer, served by roboscope.camera.server at "/".
+  Shows the MJPEG preview, lets the user change CameraSettings (POST /api/settings),
+  run a star locate (GET /api/locate), download a snapshot or a raw .npy frame, and
+  polls /api/status every 2 s. Dark, dim-red theme ("night") by default to keep the
+  observer's dark adaptation; the "day" toggle switches to a neutral theme.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>roboscope camera</title>
+<style>
+  :root { --bg:#000; --panel:#120000; --fg:#c33; --dim:#722; --line:#300; --accent:#f44; }
+  body.day { --bg:#1b1d21; --panel:#25282d; --fg:#e6e6e6; --dim:#9aa0a6; --line:#3a3e44; --accent:#7fb2ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.4 system-ui, sans-serif; }
+  main { display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:12px; padding:12px; }
+  @media (max-width:900px) { main { grid-template-columns:1fr; } }
+  .view { background:#000; border:1px solid var(--line); display:flex; align-items:center; justify-content:center; min-height:300px; }
+  .view img { max-width:100%; height:auto; image-rendering:pixelated; display:block; }
+  body:not(.day) .view img { filter: sepia(1) saturate(6) hue-rotate(-50deg) brightness(.8); }
+  aside { display:flex; flex-direction:column; gap:12px; }
+  section { background:var(--panel); border:1px solid var(--line); padding:10px; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); margin:0 0 8px; }
+  label { display:grid; grid-template-columns:110px 1fr; align-items:center; gap:6px; margin:4px 0; }
+  input, select, button { background:var(--bg); color:var(--fg); border:1px solid var(--line); padding:4px 6px; font:inherit; }
+  input[type=range] { padding:0; accent-color:var(--accent); }
+  button { cursor:pointer; } button:hover { border-color:var(--accent); }
+  .row { display:flex; gap:6px; flex-wrap:wrap; }
+  dl { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; margin:0; font-variant-numeric:tabular-nums; }
+  dt { color:var(--dim); } dd { margin:0; text-align:right; }
+  .err { color:var(--accent); white-space:pre-wrap; }
+  a { color:var(--fg); }
+</style>
+</head>
+<body>
+<main>
+  <div class="view"><img id="stream" src="/stream" alt="camera stream"></div>
+  <aside>
+    <section>
+      <h2>Exposure</h2>
+      <label>Mode <select id="mode"><option value="binned">binned 1296×972</option><option value="full">full 2592×1944</option></select></label>
+      <label>Exposure ms <input id="exposure_ms" type="number" min="0.01" max="10000" step="any"></label>
+      <label>&nbsp;<input id="exposure_log" type="range" min="-2" max="4" step="0.05" title="log scale, 0.01 ms – 10 s"></label>
+      <label>Gain <input id="gain" type="number" min="1" max="64" step="0.1"></label>
+    </section>
+    <section>
+      <h2>Display</h2>
+      <label>Stretch <select id="stretch"><option value="auto">auto</option><option value="manual">manual</option></select></label>
+      <label>Black <input id="black" type="number" step="any"></label>
+      <label>White <input id="white" type="number" step="any"></label>
+      <label>Crosshair <input id="crosshair" type="checkbox"></label>
+      <label>Preview fps <input id="preview_fps" type="number" min="0.1" max="30" step="0.5"></label>
+      <label>Theme <button id="theme" type="button">day</button></label>
+    </section>
+    <section>
+      <h2>Actions</h2>
+      <div class="row">
+        <button id="locate" type="button">Locate star</button>
+        <a href="/snapshot.jpg" download="snapshot.jpg"><button type="button">Snapshot</button></a>
+        <a href="/api/frame.npy"><button type="button">Raw .npy</button></a>
+      </div>
+      <dl id="fix" style="margin-top:8px"></dl>
+    </section>
+    <section>
+      <h2>Status</h2>
+      <dl id="status"></dl>
+      <div id="error" class="err"></div>
+    </section>
+  </aside>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const fields = ["mode","exposure_ms","gain","stretch","black","white","crosshair","preview_fps"];
+
+function show(s) {
+  for (const k of fields) {
+    const el = $(k); if (!el || document.activeElement === el) continue;
+    if (el.type === "checkbox") el.checked = s[k]; else el.value = s[k];
+  }
+  if (document.activeElement !== $("exposure_log")) $("exposure_log").value = Math.log10(s.exposure_ms);
+}
+async function send(changes) {
+  const r = await fetch("/api/settings", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(changes)});
+  const j = await r.json();
+  if (!r.ok) { $("error").textContent = j.error; return; }
+  $("error").textContent = ""; show(j);
+}
+for (const k of fields) $(k).addEventListener("change", e => {
+  const el = e.target, v = el.type === "checkbox" ? el.checked : (el.type === "number" ? Number(el.value) : el.value);
+  send({[k]: v});
+});
+$("exposure_log").addEventListener("input", e => { $("exposure_ms").value = (10 ** Number(e.target.value)).toPrecision(3); });
+$("exposure_log").addEventListener("change", e => send({exposure_ms: Number((10 ** Number(e.target.value)).toPrecision(3))}));
+
+const fmt = (v, d=2) => typeof v === "number" ? (Number.isInteger(v) ? v : v.toFixed(d)) : (v ?? "–");
+function list(el, obj) { el.innerHTML = Object.entries(obj).map(([k,v]) => `<dt>${k}</dt><dd>${fmt(v)}</dd>`).join(""); }
+
+$("locate").addEventListener("click", async () => {
+  $("locate").disabled = true; $("fix").innerHTML = "<dt>locating…</dt>";
+  try {
+    const r = await fetch("/api/locate"); const j = await r.json();
+    if (!r.ok) list($("fix"), {error: j.error});
+    else if (!j.found) list($("fix"), {found: "no star", frame: j.frame.seq});
+    else list($("fix"), {x: j.x, y: j.y, snr: j.snr, flux: j.flux, peak: j.peak, npix: j.npix,
+                         saturated: String(j.saturated), frame: j.frame.seq});
+  } finally { $("locate").disabled = false; }
+});
+$("theme").addEventListener("click", () => {
+  const day = document.body.classList.toggle("day");
+  $("theme").textContent = day ? "night" : "day";
+});
+// Restart the stream if it stalls (e.g. server restart).
+$("stream").addEventListener("error", () => setTimeout(() => $("stream").src = "/stream?" + Date.now(), 2000));
+
+async function poll() {
+  try {
+    const s = await (await fetch("/api/status")).json();
+    show(s.settings);
+    const f = s.frame || {};
+    list($("status"), {camera: s.info.model, "capture fps": s.fps, idle: String(s.idle), frame: f.seq, "age s": f.age_s,
+      "exposure ms": f.exposure_us != null ? f.exposure_us / 1000 : null, gain: f.gain,
+      background: f.background, noise: f.noise, max: f.max,
+      "saturated %": f.saturated_fraction != null ? 100 * f.saturated_fraction : null,
+      "CPU °C": s.temperature_c});
+    $("error").textContent = s.last_error || "";
+  } catch (e) { $("error").textContent = "status: " + e; }
+}
+poll(); setInterval(poll, 2000);
+</script>
+</body>
+</html>

@@ -65,3 +65,13 @@ def test_schema_checked(tmp_path):
     bad.write_text(json.dumps({"schema": 99}))
     with pytest.raises(ValueError, match="schema"):
         HardwareCalibration.load(bad)
+
+
+def test_save_is_compact_and_roundtrips(tmp_path):
+    from roboscope.calibration import DEFAULT_PATH, HardwareCalibration
+
+    c = HardwareCalibration.load(DEFAULT_PATH)
+    c.save(tmp_path / "c.json")
+    text = (tmp_path / "c.json").read_text()
+    assert '"az": {"value": 3085.0' in text                  # one line per measurement
+    assert HardwareCalibration.load(tmp_path / "c.json").data == c.data

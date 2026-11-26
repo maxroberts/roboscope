@@ -6,15 +6,19 @@
 # Idempotent: safe to re-run after any edit in the repo.
 #
 # What it does:
-#   1. Installs the packages roboscope needs on the Pi (unattended-upgrades).
+#   1. Installs the packages roboscope needs on the Pi (unattended-upgrades and the
+#      camera stack: python3-picamera2, numpy, simplejpeg).
 #   2. Copies rootfs/ over / (owner root, mode 644). Every file there says it is
 #      deployed from the repo. The files are:
 #      - etc/ssh/sshd_config.d/10-roboscope-keyonly.conf: key-only SSH, no root login.
 #      - etc/apt/apt.conf.d/20auto-upgrades: daily apt update + unattended-upgrade.
 #      - etc/apt/apt.conf.d/52roboscope-unattended-upgrades: allow Raspbian/RPi origins.
+#      - etc/systemd/system/roboscope-camera.service: the camera server.
 #   3. Validates the sshd config before reloading sshd (a broken config is removed, so
 #      SSH is never left unable to start).
 #   4. Disables Bluetooth (service off now; dtoverlay=disable-bt from the next boot).
+#   5. Installs the camera server code (staged roboscope_camera/ → /opt/roboscope) and
+#      (re)starts roboscope-camera.service (unit in rootfs/etc/systemd/system).
 # Reboot is left to the caller; the script prints whether one is needed.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -22,7 +26,11 @@ cd "$(dirname "$0")"
 export DEBIAN_FRONTEND=noninteractive
 
 echo "== packages"
-apt-get install -y -q unattended-upgrades >/dev/null
+# Camera stack from apt, not pip/uv: picamera2 binds to the system libcamera, and
+# armv6 wheels for numpy etc. would have to be compiled on the Zero. No recommends:
+# they pull in Qt/GUI preview packages.
+apt-get install -y -q --no-install-recommends unattended-upgrades \
+    python3-picamera2 python3-numpy python3-simplejpeg >/dev/null
 
 echo "== config files"
 # Files are listed relative to rootfs/ and installed at the same path under /.
@@ -50,6 +58,23 @@ if ! grep -q '^dtoverlay=disable-bt' "$CFG"; then
     # every model.
     printf '\n# roboscope: Bluetooth off (deployed by provision.sh)\n[all]\ndtoverlay=disable-bt\n' >> "$CFG"
     reboot_needed=1
+fi
+
+echo "== camera server"
+# Code: src/roboscope/camera from the repo, staged by deploy_camera_pi.sh as
+# roboscope_camera/ (it uses relative imports, so the package name doesn't matter).
+if [ -d roboscope_camera ]; then
+    rm -rf /opt/roboscope/roboscope_camera
+    mkdir -p /opt/roboscope
+    cp -r roboscope_camera /opt/roboscope/
+    chown -R root:root /opt/roboscope
+    chmod -R u=rwX,go=rX /opt/roboscope
+    systemctl daemon-reload
+    systemctl enable roboscope-camera.service >/dev/null 2>&1
+    systemctl restart roboscope-camera.service
+    sleep 5
+    systemctl is-active roboscope-camera.service \
+        || journalctl -u roboscope-camera.service -n 20 --no-pager
 fi
 
 echo "== unattended-upgrades dry run"
