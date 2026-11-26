@@ -116,9 +116,10 @@ with connect() as cam:                     # SSH tunnel to roboscopeCam.local
   - The server (`server.py`) runs on the camera Pi as `roboscope-camera.service`. It
     owns the camera (picamera2, raw 10-bit Bayer, manual exposure/gain, 2×2-summed
     linear frames) and finds the star there (`starfind.py`, numpy only), so only
-    coordinates cross Wi-Fi. It has an HTTP API (`/api/locate`, `/api/settings`,
+    coordinates need to cross the network. It has an HTTP API (`/api/locate`, `/api/settings`,
     `/api/frame.npy`, …) and an MJPEG browser UI.
-  - It binds to loopback only. The host reaches it through an SSH tunnel:
+  - It binds to loopback only. The host reaches it through an SSH tunnel, over the
+    Zero's USB link when present (raw frame ~0.4 s from the 3B+), else Wi-Fi:
     `CameraClient` (`client.py`), whose `locate()` is `AlignmentSession`'s star
     finder, and `scripts/camera_view.py` for the browser.
   - The same files deploy to the Pi as package `roboscope_camera`, so they use relative
@@ -170,6 +171,9 @@ with connect() as cam:                     # SSH tunnel to roboscopeCam.local
   - `telescope_interface.md`: every input and output of the telescope (ports, LX200
     commands, motor bus), with what's been verified.
   - `hardware_findings.md`: dated experimental results.
+  - `pi_techniques.md`: Raspberry Pi techniques used here, with commands. They include
+    USB power switching (`uhubctl`), power-supply checks (`get_throttled`), USB gadget
+    networking, udev triggers and boot diagnostics.
   - `next_session_board_wedge.md`: the motor-board bus-sync ("wedge") investigation.
     Resolved: the boot-time resync was the cause.
   - `wiring_hbx_uno.md`: Uno ↔ HBX motor-bus wiring.
