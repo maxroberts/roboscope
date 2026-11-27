@@ -1,0 +1,24 @@
+# roboscope camera hub on the host Pi (3B+): a camera server with --source remote. It
+# fetches frames from the camera Zero's server over the USB link (10.12.194.1), renders
+# the browser preview, runs locate and serves the UI on the 3B+'s loopback, port 47623
+# (= roboscope.camera.client.PORT).
+# Deployed from the roboscope repo (hardware/host_pi/rootfs); edit it there, not on the Pi.
+#
+# A *user* service for max (systemctl --user), so a code-only deploy can restart it
+# without sudo. provision.sh turns on linger for max, so it runs from boot with no login,
+# and enables this unit. Code: ~/roboscope with its uv venv, put there by
+# scripts/deploy_host_pi.sh.
+# The Zero boots ~1 min slower than the 3B+. Until its server answers, start-up fails
+# and systemd retries every 5 s, with no start limit.
+[Unit]
+Description=roboscope camera hub (frames from the camera Zero over USB)
+StartLimitIntervalSec=0
+
+[Service]
+WorkingDirectory=%h/roboscope
+ExecStart=%h/roboscope/.venv/bin/python -m roboscope.camera.server --source remote --remote-url http://10.12.194.1:47623 --host 127.0.0.1 --port 47623
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

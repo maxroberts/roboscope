@@ -1,7 +1,18 @@
 # roboscope camera server (src/roboscope/camera/server.py, installed by provision.sh as
-# /opt/roboscope/roboscope_camera). Loopback only: reach it through an SSH tunnel.
-# Port 47623 = roboscope.camera.client.PORT; keep them in sync.
+# /opt/roboscope/roboscope_camera). Port 47623 = roboscope.camera.client.PORT; keep them
+# in sync.
 # Deployed from the roboscope repo (hardware/camera_pi/rootfs); edit it there, not on the Pi.
+#
+# Who can connect:
+#   - It binds to 0.0.0.0, so it also listens on the USB link, where the host Pi's
+#     camera hub (a server with --source remote) fetches frames over plain HTTP. 0.0.0.0
+#     rather than 10.12.194.1 because usb0 may get its address after this starts.
+#   - systemd's per-service IP filter (eBPF, CONFIG_CGROUP_BPF=y on this kernel) drops
+#     every packet except to and from this Pi itself (SSH tunnels arrive on loopback)
+#     and the host Pi's USB address 10.12.194.2. So the LAN can't reach it over Wi-Fi,
+#     even though it listens on all addresses.
+#   - The service makes no other network connections, so the filter doesn't get in its
+#     way.
 [Unit]
 Description=roboscope camera server
 After=network.target
@@ -10,7 +21,9 @@ After=network.target
 User=max
 Group=video
 WorkingDirectory=/opt/roboscope
-ExecStart=/usr/bin/python3 -m roboscope_camera.server --source pi --host 127.0.0.1 --port 47623
+ExecStart=/usr/bin/python3 -m roboscope_camera.server --source pi --host 0.0.0.0 --port 47623
+IPAddressDeny=any
+IPAddressAllow=localhost 10.12.194.2
 Restart=on-failure
 RestartSec=5
 

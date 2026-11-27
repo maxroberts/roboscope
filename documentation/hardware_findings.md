@@ -844,3 +844,293 @@ and exposes nothing new on either network.
   took 1.3 s.
 - **Fix:** `loginctl enable-linger max` (camera Pi `provision.sh`). After a 60 s gap,
   logins take 1.05 s both times, and the tunnel's first `status` 0.38 s.
+
+**Preview rate check (Safari reported "much slower than 2 fps"):**
+- **The stream delivers 2 fps.** 20 frames in 10 s, counted both on the Zero's
+  loopback and on the Mac through the 3B+ jump tunnel, ~8.6 KB per frame. The server
+  was capturing at 9.3 fps.
+- **Likely reason it looked slow:** with no optics, consecutive frames look identical.
+  Safari's handling of MJPEG in an `<img>` wasn't measured.
+- **Frame stamp added** to each preview frame (`#seq HH:MM:SS.d`, bottom-left, tiny
+  built-in font), so updates and dropped frames are visible on screen. It cost
+  41.5 ms per frame on the Zero when glyphs were enlarged with `np.kron` on every
+  frame, and 3.35 ms with the enlarged glyphs cached.
+
+**"Super laggy" from another computer: the Zero's Wi-Fi power save.**
+- **Report:** the live view in Safari on a second MacBook on the LAN was unusable.
+  From this Mac, through the 3B+ and the USB link, it had looked fine.
+- **Pings from this Mac (20 each):**
+
+  | Target | Average | Worst | Minimum |
+  |---|---|---|---|
+  | 3B+ over Wi-Fi | 14 ms | 94 ms | |
+  | Zero over Wi-Fi | **1,591 ms** | 3,332 ms | 258 ms |
+
+  - The Zero's signal was good: −47 dBm on 2.4 GHz, against the 3B+'s −51 dBm on
+    5 GHz.
+  - Its boot log showed `brcmf_cfg80211_set_power_mgmt: power save enabled`, and
+    NetworkManager's profile setting was "default".
+- **Test:** power save off, temporarily (`nmcli connection modify --temporary …
+  802-11-wireless.powersave 2`, run over the USB link through the 3B+ so the Wi-Fi
+  reconnect couldn't cut the session).
+  - Average 116 ms, then 39 ms over 60 pings (minimum 5 ms, worst 292 ms, 2 of 60 lost).
+- **Kept:** `NetworkManager/conf.d/90-roboscope-wifi-powersave.conf`
+  (`wifi.powersave=2`) on the Zero only; the 3B+ keeps the default (user's choice).
+  - After a reboot the log shows it disabled at 71 s.
+  - 60 pings: average 78 ms, worst 711 ms, none lost (just after boot).
+- **Likely the other machine's route:** it isn't plugged into the Zero, so
+  `camera_view.py` would have tunnelled over the Zero's Wi-Fi. Its exact route wasn't
+  checked.
+- **Decision (user, 2026-11-26):** viewers shouldn't depend on the Zero's Wi-Fi. Move
+  rendering and serving to the 3B+, with the Zero sending frames over USB.
+
+## 2026-11-26 afternoon: camera hub on the 3B+
+
+**Setup:**
+- **Zero:** its camera server now also listens on the USB link. A new `/api/raw`
+  endpoint gives the next frame after a sequence number, as raw uint16 with metadata
+  headers.
+  - systemd's per-service IP filter (`IPAddressAllow=localhost 10.12.194.2`,
+    `IPAddressDeny=any`; the kernel has `CONFIG_CGROUP_BPF=y`) admits only the Zero
+    itself and the 3B+ over USB.
+- **3B+:** runs the same server with `--source remote`
+  (`RemoteSource`, a `systemctl --user` service with linger). It fetches 4 frames/s
+  while active and 1/s "passively" while idle, and renders, locates and serves.
+- **Clients:** `connect()` goes to the hub, directly on the 3B+ and through an SSH
+  tunnel to `roboscope.local` elsewhere.
+
+**Access filter, tested:**
+
+| Request to the Zero's server (port 47623) | Result |
+|---|---|
+| From the Zero itself (loopback) | 200 |
+| From the 3B+ to 10.12.194.1 | 200 |
+| From the 3B+ to the Zero's Wi-Fi address | blocked (timeout) |
+| From the Mac over Wi-Fi | blocked (timeout) |
+
+**Cost per frame on the Zero** (measured in isolation): binning (`bin_bayer`, binned
+mode) 30.6 ms, serializing 5.6 ms for 629,856 bytes.
+
+**Measured with one viewer on the hub, the Mac tunnelling to the 3B+:**
+
+| | Before (preview rendered on the Zero) | Hub on the 3B+ |
+|---|---|---|
+| Zero's server process CPU | 51% (2 fps preview) | 65% (4 frames/s to the hub; 24% idle) |
+| 3B+ hub CPU | – | ~10% |
+| Preview at the Mac | 2.0 fps | 2.1 fps (32 frames in ~15 s) |
+| Round trip from the Mac | ~150 ms (two hops) | 30 ms |
+| Newest frame's age at the server | 0.06–0.17 s | 0.20–0.44 s |
+| `locate` | ~0.3 s (from the 3B+) | 0.48–0.53 s (from the Mac) |
+| Raw frame | ~0.4 s (from the 3B+) | 0.42–0.61 s (from the Mac) |
+
+- **The Zero isn't lighter, per frame:** shipping a frame cost about what rendering a
+  preview frame did. Kernel time was high (35% "sy"), so the network send is likely the
+  expensive part.
+- **My estimate was wrong:** I had expected ~80 ms per shipped frame against ~200 ms to
+  render one. In practice they're about equal.
+- **What the hub does buy:**
+  - viewers no longer touch the Zero's Wi-Fi or its CPU;
+  - the preview rate no longer costs the Zero anything;
+  - locate runs on the 3B+.
+- **What it costs:**
+  - frames are 0.25 s apart at the hub, so locate is ~0.2 s slower;
+  - `--pull-fps` trades Zero CPU against that delay.
+- **Idle chain:** with no requests, the hub went idle at 13:53:13 and the Zero 30 s
+  later (passive fetches don't count as activity). The Zero's server then used ~12% CPU.
+- **Client paths checked:**
+  - `connect()` on the 3B+ goes direct (no tunnel; first locate after idle 0.63 s);
+  - the Mac reaches the hub through a tunnel;
+  - the Zero is still reachable directly for debugging;
+  - `camera_view_via_host.sh` loads the page and closes cleanly on Ctrl-C.
+
+**Bug found and fixed: the hub stalled after the Zero's server restarted.**
+- **Symptom:** after a Zero redeploy restarted its camera service, every hub fetch
+  returned `504 Gateway Timeout`.
+- **Cause:** the restarted server numbers frames from 1 again, but the hub kept asking
+  for frames after its last number (several hundred). The hub's own frames also carried
+  the Zero's numbers, so its MJPEG viewers would have stalled too.
+- **Fix in `RemoteSource`:**
+  - it numbers frames itself;
+  - after any failed fetch it asks for the upstream's latest frame;
+  - it sends its sensor settings again, because a restarted Zero comes back with
+    defaults.
+- **Test:** `tests/test_camera_remote.py::test_hub_recovers_from_upstream_restart`.
+  Checked to fail without the fix: it presets a high upstream number, since the
+  synthetic source's numbering would otherwise overtake the old one within a second.
+- **On hardware:** with the hub set to a 20 ms exposure, `systemctl restart
+  roboscope-camera` on the Zero (14:03:10).
+  - `locate` through the hub worked about 3 s later, with a 20 ms frame, and the
+    Zero's settings read 20 ms again.
+  - The hub's frame numbers continued from 37 to 52.
+  - The 22 "capture failed" log lines are the fetches made while the Zero's server
+    was down.
+
+## 2026-11-26 afternoon: Zero feed stress test, preview size and fps limits
+
+**Method:**
+- The hub was stopped. A load script on the 3B+ fetched `/api/raw` from the Zero over
+  USB at fixed target rates.
+- **Recorded per step:** delivered rate, fetch time, frame age on arrival (Zero's
+  `X-Now-Ns − X-Start-Ns` plus the transfer time), frame-number gaps, and errors.
+- **Capture rate:** worked out as delivered × mean frame-number gap.
+- **Zero CPU:** sampled from `/proc/stat` every 2–3 s by one shell loop.
+  - A first monitor that started `top`, `curl` and Python every 3 s on the Zero cost
+    so much CPU that it roughly halved the rates measured.
+  - Its numbers are discarded.
+
+**Full-size frames, rising rate** (first run, heavier monitor; ceiling only):
+- Delivery topped out at about 4.3 fps, whatever the target. The Zero's CPU was
+  saturated, and its own capture rate fell from ~9 to ~6.5 fps.
+- No errors at any rate.
+- Frame age at arrival was 0.45–0.6 s median at every rate, even at 2/s, with spikes
+  to 1.5 s. So most of the delay is built in (camera buffering, binning, the copy)
+  rather than queueing.
+
+**Smaller frames:** `/api/raw?reduce=k` max-pools k×k (stars survive).
+- numpy reshape-and-max took 72 ms on the Zero for k=2.
+- Repeated halving with `np.maximum` on strided rows and columns gives identical
+  output (checked against the reference for k = 2, 3, 4) in 12.5 ms.
+- **Frame sizes:** full 648×486 = 630 KB, half 324×243 = 157 KB, quarter 162×121 =
+  39 KB.
+
+**Overload leaves the Zero slow afterwards:** steps run straight after a saturating step
+(or right after the Zero woke from its 1 fps idle mode) delivered far less. For example,
+half size at 10/s got 5.5 fps in one sequence and 8.4–9.2 in others. So each rate was
+measured **in isolation**: 12 s of load, 20 s of rest, twice, in a shuffled order. The
+Zero was 54% idle at rest.
+
+| Size | Target | Delivered (repeat 1 / 2) | Zero CPU idle | Capture | Fetch p50/p95 | Frame age p50 |
+|---|---|---|---|---|---|---|
+| full | 3 | 3.05 / 3.04 | 31% / 28% | ~9.7 fps | 126–133 / 184–209 ms | 324–343 ms |
+| full | 4 | 4.04 / 4.04 | 23% / 28% | ~9.7 | 122–126 / 165–193 | 330–334 |
+| full | 5 | **4.32** / 5.01 | 18% / 17% | 5.5 (first step after idle) / 9.6 | 127–152 / 203–982 | 348–366 |
+| full | 6 | 5.99 / 6.00 | 9% / 6% | ~9.5 | 125–138 / 174–195 | 335–359 |
+| half | 6 | 6.03 / 6.01 | 19% / 18% | ~9.6 | 98–99 / 145–158 | 317–321 |
+| half | 7 | 7.02 / 6.99 | 12% / 16% | ~9.5 | 96–100 / 131–142 | 303–321 |
+| half | 8 | 7.99 / 8.04 | 7% / 10% | ~9.5 | 99–103 / 150–152 | 312–319 |
+| half | 10 | 8.69 / 8.79 | 4% / 1% | ~9.5 | 106–108 / 162–167 | 315–319 |
+| quarter | 8 | 8.04 / 8.04 | 11% / 12% | ~9.5 | 88–91 / 149 | 300–307 |
+| quarter | 10 | 9.70 / 8.98 | 1% / 4% | ~9.7 | 96–101 / 140–173 | 284–312 |
+
+**Limits chosen** (`RemoteSource.MAX_PREVIEW_FPS`): the highest rate delivered at 97%
+or better of target with at least 10% of the Zero idle, in both repeats.
+- **full 4, half 7, quarter 8 fps.**
+- The hub caps `preview_fps` to these for the chosen `preview_size`. Locate and `.npy`
+  downloads always fetch full-size frames, unpaced.
+- No errors in any step. Frame age at arrival was ~0.3 s median and ≤0.6 s worst in
+  the isolated runs, at every size.
+
+**Verified through the hub** (each size set to `preview_fps` 30; 12 s of MJPEG counted on
+the Mac through a tunnel; Zero CPU from `/proc/stat`):
+
+| Size | Clamped to | Streamed | Zero idle |
+|---|---|---|---|
+| full | 4 | 4.00 fps | 23% |
+| half | 7 | 6.92 fps | 16% |
+| quarter | 8 | 7.75 fps | 10% |
+
+- With a quarter-size preview, `locate` took 0.42–0.46 s on full-size frames
+  (`frame.scale` 4 = the full binned grid).
+- Settings were restored to full size at 2 fps.
+
+## 2026-11-26 afternoon: demand-matched capture
+
+**Why:** the per-frame cost model (from the isolated runs: CPU per frame shipped = drop
+in Zero idle ÷ rate) gave full ~75 ms, half ~58 ms, quarter ~54 ms. That's about 50 ms
+fixed (binning 31 ms, pooling 12.5 ms for reduced sizes, per-request overhead) plus
+~0.04 ms/KB. Meanwhile, capturing 10 fps that nobody used cost ~46% of the Zero's CPU
+(54% idle at rest). That's why frame rate didn't scale inversely with frame size.
+
+**Change:**
+- The hub sends `fps=<preview_fps>` with each fetch.
+- While that's recent (5 s) and nobody streams from the Zero directly, the Zero caps its
+  capture at 1.1 × that rate (`PicameraSource.set_max_fps` → `FrameDurationLimits`).
+- Unit test: `test_upstream_capture_matches_hub_demand`.
+
+**Re-measured** (same isolated method; the load script sends `fps=` like the hub):
+
+| Size | Target | Delivered | Zero idle | Capture | Before the change |
+|---|---|---|---|---|---|
+| full | 4 | 4.04 / 4.06 | 46% / 44% | 4.6–4.8 fps | 23–28% idle |
+| full | 5 | 5.04 / 5.05 | 32% / 35% | 5.7 | one repeat delivered 4.3 |
+| full | 6 | 6.02 / 6.02 | 18% / 25% | 6.7 | 6–9% idle |
+| full | 7 | 7.01 / 7.02 | 6% / 8% | 7.8–7.9 | – |
+| half | 7 | 4.72 (waking from idle mode, 27% idle) / 7.03 | 27% / 24% | 4.7 / 7.8 | 12–16% |
+| half | 8 | 8.02 / 8.01 | 9% / 17% | 8.7 | 7–10% |
+| half | 9 | 5.82 / 8.86 | 1% / 4% | 6.2 / 9.3 | – |
+| quarter | 8 | 7.99 / 8.03 | 12% / 15% | 8.7–8.8 | 11–12% |
+| quarter | 9 | 9.02 / 9.02 | 8% / 8% | 9.2–9.6 | – |
+
+- **New limits: full 6 (was 4), half 7, quarter 8.**
+- The gain is large at low rates and small near 10 fps, where 1.1 × the rate is
+  already close to the old 10 fps capture.
+- **Delays after idle mode, explained:** steps run right after the Zero sat in its
+  1 fps idle mode delivered less for a few seconds, with CPU to spare. New frame-rate
+  controls take effect ~3 frames later, which at 1 fps is 3 s or more. This likely
+  explains the "slow after overload" runs earlier too.
+- **At the default** (full, 2 fps, one viewer through the hub):
+  - the Zero captured at 2.2 fps ("capture rate cap 2.2 fps" in its log) and was
+    **62% idle** (24% before);
+  - 46 MJPEG frames in 25 s;
+  - **locate took 0.40–0.71 s**, against 0.42–0.53 s before, since fresh frames are
+    ~0.45 s apart.
+
+## 2026-11-26 evening: page errors, settings sweep, latency
+
+**Page errors.** After the user saw error messages while changing settings, both
+services' logs were checked. There were no capture or request errors during their
+session. Only "capture rate cap" changes were logged. Two page bugs explained the
+messages:
+- **A stale error.** The hub kept `last_error` forever. A "Connection refused" from a
+  few seconds of Zero restart at 16:40 (a deploy) was shown on the page for hours,
+  although frames were flowing. Fixed: a successful capture clears it.
+- **A hidden error.** A rejected setting (e.g. an emptied box, sent as 0) shared one
+  error line with the status poll, which overwrote it within 2 s. Fixed: rejections get
+  their own line. Some rejection messages are confusing: gain 0 is reported as
+  "exposure_ms and gain must be > 0".
+
+**Settings sweep** (scratchpad script, on the 3B+ against the hub, a stream open):
+- 27 changes covering every page control, 6 s each, then a locate.
+- Every change was accepted in 5–10 ms (except the three deliberate invalid values,
+  rejected with 400).
+- No capture error, no stream stall over 1.05 s, every locate answered (0.23–1.45 s;
+  no star in view).
+- **Full sensor mode runs at ~2 fps whatever preview_fps says** (12 frames in 6 s at
+  preview_fps 6). The fps limits table was measured in binned mode, so the page's
+  "max 6" hint is wrong in full mode.
+
+**Latency** (2026-11-26, exposure 10 ms, binned unless noted):
+- Method:
+  - each stream part now carries `X-Wall-Time`, the time the Zero's Python got the
+    frame (Zero clock);
+  - a viewer on the Mac, through the same SSH tunnel as the view script, recorded each
+    part's arrival;
+  - clock offsets were measured over SSH (Zero +45 ms, 3B+ −34 ms against the Mac,
+    ±2 ms; both Pis NTP-synced) and corrected for;
+  - on the Zero, its sensor timestamps showed **80–130 ms from exposure start to the
+    frame reaching Python** (exposure, readout, driver queue);
+  - setting latency = from POST to the first hub frame with the new exposure.
+
+| Preview | Frame age at viewer, median (min–max) | + Zero part | ≈ light to screen | Setting change to new frame |
+|---|---|---|---|---|
+| full, 2 fps | 695 ms (451–1319) | ~0.1 s | **~0.8 s** | 3.2–4.0 s |
+| full, 6 fps | 293 ms (230–589) | ~0.1 s | **~0.4 s** | 1.0–1.5 s |
+| half, 7 fps | 231 ms (98–336) | ~0.1 s | **~0.35 s** | 1.0–1.2 s |
+| quarter, 8 fps | 177 ms (100–251) | ~0.1 s | **~0.3 s** | 0.9–1.1 s |
+| full sensor mode, full, 2 fps | 650 ms (518–871) | ~0.1 s | ~0.75 s | 3.9–4.1 s |
+
+- At low rates, most of the delay is the frame interval: the Zero captures and the hub
+  fetches on independent schedules, so a frame waits on average about half a frame
+  interval (~0.23 s at 2 fps) before the hub takes it, then the hub waits up to one
+  interval to stream it. The fixed path (fetch, bin, render, JPEG, SSH) is ≈ 0.1–0.2 s.
+- A setting change takes about 7 frame intervals to show: the request queue on the
+  Zero already holds frames exposed with the old settings. At 2 fps that is 3–4 s.
+- For steering by eye, use 6–8 fps: what you see is ~0.3–0.4 s old.
+
+**For comparison, the 2019 setup on this Zero** (`hardware/camera_pi/legacy_2019`,
+`documentation/camera_pi_state.md`):
+- UV4L streamed MJPEG at 640×480, 5 fps, quality 10 (its config). `resetGarageCam.sh`
+  restarted it by hand at 20 fps.
+- UV4L's raspicam driver had the camera firmware scale the frames and JPEG-encode them
+  in hardware, so little of the work fell on the CPU (its load wasn't recorded in 2019). Our path ships raw 10-bit frames, so locate gets unprocessed pixels, and the
+  Zero's CPU does the binning.

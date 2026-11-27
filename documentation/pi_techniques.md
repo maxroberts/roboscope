@@ -140,7 +140,25 @@ guessing a boot order. Ours:
 To see what a rule can match on: `udevadm info /sys/class/udc/20980000.usb` (or any
 `/sys` path). After editing rules: `sudo udevadm control --reload`.
 
-## 6. Boot and reboot diagnostics
+## 6. Per-service IP filtering (systemd)
+
+A systemd service can be fenced off at the network level without a firewall:
+```ini
+[Service]
+IPAddressDeny=any
+IPAddressAllow=localhost 10.12.194.2
+```
+- **What it does:** systemd attaches an eBPF filter to the service's control group.
+  Packets to or from that service, from any other address, are dropped.
+- **Needs** `CONFIG_CGROUP_BPF=y` in the kernel. Check it with
+  `zcat /proc/config.gz | grep CGROUP_BPF`; both of our Pis have it.
+- **Our use:** the Zero's camera server listens on all addresses (so it doesn't
+  matter when `usb0` gets its address), but only the Zero itself and the 3B+ over USB
+  get through. Requests from the LAN time out. Tested 2026-11-26.
+- **The catch:** the filter also applies to the service's own outgoing connections,
+  so use it only for services that don't reach out to other machines.
+
+## 7. Boot and reboot diagnostics
 
 ```sh
 systemd-analyze                  # total boot time (kernel + userspace)
@@ -166,8 +184,14 @@ journalctl -b -o short-monotonic # seconds since boot, unaffected by clock jumps
   - Disabling cloud-init after first boot.
   - Result: Zero 3:04 → 1:15, and 3B+ 1:05 → 0:18.
 
-## 7. Network and SSH scripting
+## 8. Network and SSH scripting
 
+- **User services that run from boot:** a unit in `/etc/systemd/user/` (enabled with
+  `systemctl --user enable`) runs in the user's own systemd manager. With linger on,
+  that manager starts at boot, so the service runs without anyone logged in. The user
+  can restart it with `systemctl --user restart …`, without sudo. The 3B+'s camera hub
+  works this way, so code-only deploys can restart it. Logs:
+  `journalctl --user -u <unit>`.
 - **systemd linger, for faster SSH logins:** without it, a user's systemd manager
   (`user@1000.service`) stops after their last session ends and starts again at the
   next login. On the Zero that made the first login after a gap take ~5 s instead of
@@ -185,7 +209,7 @@ journalctl -b -o short-monotonic # seconds since boot, unaffected by clock jumps
 - **sudo in scripts:** `sudo -S -p ""` reads the password from stdin, so it never goes
   on a command line or into a file.
 
-## 8. SD card checks
+## 9. SD card checks
 
 - **Full check:** `f3write` and then `f3read` on the mounted card [4] (from Homebrew on
   the Mac). It finds fake capacity and bad sectors. Our 32 GB card took about 2 h and

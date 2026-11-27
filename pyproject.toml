@@ -11,6 +11,7 @@ dependencies = [
     "pandas>=3.1.1",
     "pgeocode>=0.5.0",
     "pyserial>=3.5",
+    "simplejpeg>=1.10.1",
     "skyfield>=1.55",
 ]
 
@@ -22,7 +23,6 @@ build-backend = "uv_build"
 dev = [
     "ipykernel>=7.4.0",
     "pytest>=9.2.0",
-    "simplejpeg>=1.10.1",
 ]
 
 [tool.pytest.ini_options]

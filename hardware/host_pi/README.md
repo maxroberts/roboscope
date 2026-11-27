@@ -1,8 +1,9 @@
 # Host Pi: deployable configuration
 
 The Raspberry Pi 3B+ that runs roboscope at the telescope (hostname `roboscope`, reached
-as `roboscope.local`). It drives the Arduino motor controller over USB serial and
-reaches the camera Pi Zero over the Zero's USB gadget link. This folder is the source of
+as `roboscope.local`). It drives the Arduino motor controller over USB serial, and it
+runs the **camera hub**: it takes frames from the camera Pi Zero over the Zero's USB
+gadget link, and renders the preview, runs locate and serves the camera UI. This folder is the source of
 truth for its setup: a freshly flashed card plus `scripts/deploy_host_pi.sh` should
 reproduce it. Don't edit config on the Pi directly; edit it here and redeploy.
 
@@ -16,13 +17,14 @@ reproduce it. Don't edit config on the Pi directly; edit it here and redeploy.
 | `rootfs/etc/apt/apt.conf.d/52roboscope-unattended-upgrades` | Also lets unattended-upgrades install from the Raspberry Pi origin (Debian's is already in the stock config). No automatic reboot. |
 | `rootfs/etc/NetworkManager/system-connections/roboscope-camlink.nmconnection` | The USB link to the camera Zero: static 10.12.194.2/28, no gateway, bound to the gadget's fixed host-end MAC `02:72:62:00:00:02`. Static because the 3B+ boots faster than the Zero, so DHCP from the Zero could time out. Installed mode 600. |
 | `rootfs/etc/rpi/swap.conf.d/90-roboscope.conf` | Swap to zram only, no swap file. |
+| `rootfs/etc/systemd/user/roboscope-camera.service` | The camera hub: `~/roboscope/.venv/bin/python -m roboscope.camera.server --source remote --remote-url http://10.12.194.1:47623` on 127.0.0.1:47623. It fetches frames at the preview's size and rate, capped per size at the measured limits (full 6, half 7, quarter 8 fps), and tells the Zero its rate so the Zero captures only about that fast. It's a user service for `max` (with linger, so it runs from boot), so code-only deploys can restart it without sudo. It retries every 5 s until the Zero's server answers. |
 | `rootfs/etc/systemd/journald.conf.d/90-roboscope.conf` | Journal kept on the SD card (max 100 MB) instead of RAM only, so power events and unclean resets can be traced after a reboot. |
 | `rootfs/etc/cloud/cloud-init.disabled` | cloud-init off after provisioning. A fresh card doesn't have this file, so the Imager's first-boot setup still runs. |
 
 `scripts/deploy_host_pi.sh` (on the Mac) pushes this folder and runs `provision.sh`.
 It then authorizes the 3B+'s SSH key on the camera Zero and records the Zero's host key
-on the 3B+. Last, it syncs the repo to `~/roboscope` and runs `uv sync --dev`.
-`--code-only` repeats just the code sync.
+on the 3B+. Last, it syncs the repo to `~/roboscope`, runs `uv sync --dev` and restarts
+the camera hub. `--code-only` repeats just the code sync and the restart.
 
 ## Rebuilding from scratch
 1. Raspberry Pi Imager:
@@ -51,6 +53,13 @@ on the 3B+. Last, it syncs the repo to `~/roboscope` and runs `uv sync --dev`.
   together, so it cold-boots the Zero, and also cuts the Uno. Port-level switching
   (`-l 1-1.1 -p 3`) doesn't actually cut the power.
 - `uv run pytest` passes here: the full suite takes ~5 min, against ~26 s on the Mac.
+- **Camera hub:** check it with `systemctl --user status roboscope-camera` and
+  `journalctl --user -u roboscope-camera`. On this Pi, `roboscope.camera.connect()`
+  goes to it directly. From other machines, use `scripts/camera_view_via_host.sh` or
+  `camera_view.py`, which need an SSH key on this Pi only. The shell script shares its
+  tunnel on the LAN by default, so further computers need no key, just the printed URL.
+  - Measured with one viewer (2026-11-26): ~10% CPU here; from the Mac, 30 ms round
+    trip, 2 fps preview, locate ~0.5 s.
 - **Power is marginal.** Every supply tried trips the Pi's under-voltage flag under
   load, which slows the CPU from 1.4 GHz to 600 MHz. It runs from a bench supply at
   5.25 V for now; the Uno and the Zero are powered from the Pi's USB ports. Details:

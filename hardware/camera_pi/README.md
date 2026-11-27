@@ -13,13 +13,14 @@ edit config on the Pi directly; edit it here and redeploy.
 | `rootfs/etc/ssh/sshd_config.d/10-roboscope-keyonly.conf` | Key-only SSH, no root login (overrides the Imager's `50-cloud-init.conf`). |
 | `rootfs/etc/apt/apt.conf.d/20auto-upgrades` | Daily apt update + unattended-upgrade. |
 | `rootfs/etc/apt/apt.conf.d/52roboscope-unattended-upgrades` | Lets unattended-upgrades install from the Raspbian and Raspberry Pi origins (the stock config only matches Debian's, so it would upgrade nothing). No automatic reboot. |
-| `rootfs/etc/systemd/system/roboscope-camera.service` | Runs `python3 -m roboscope_camera.server --source pi` as `max` on 127.0.0.1:47623 (= `client.PORT`), restart on failure. |
+| `rootfs/etc/systemd/system/roboscope-camera.service` | Runs `python3 -m roboscope_camera.server --source pi` as `max` on 0.0.0.0:47623 (= `client.PORT`), restart on failure. systemd's IP filter (`IPAddressAllow=localhost 10.12.194.2`, `IPAddressDeny=any`) admits only the Zero itself (SSH tunnels) and the host Pi's hub over USB. Tested: refused from the LAN and from the 3B+'s Wi-Fi address. |
 | `rootfs/etc/udev/rules.d/87-roboscope-gadget-load.rules`, `rootfs/etc/modprobe.d/g_ether.conf` | Load the USB Ethernet gadget (`g_ether`) once the USB controller appears, **and open `usb0` in the same step**, with fixed MACs (Pi end `02:72:62:00:00:01`, host end `02:72:62:00:00:02`). Opening `usb0` more than a few seconds after the host enumerates the gadget often left the link one-way after a cold power-up; see the USB link section. |
 | `rootfs/etc/udev/rules.d/88-roboscope-usb0-up-early.rules` | Opens `usb0` whenever it appears, for other load paths (the watchdog's reload, a manual `modprobe`). |
 | `rootfs/etc/NetworkManager/system-connections/roboscope-usb0.nmconnection` | `usb0`: static 10.12.194.1/28, no gateway. Installed mode 600. |
 | `rootfs/etc/udev/rules.d/86-roboscope-usb0-managed.rules` | Lets NetworkManager manage `usb0`. Its own `85-nm-unmanaged.rules` ignores every USB gadget interface, which left the link down on every boot. |
 | `rootfs/etc/systemd/system/roboscope-usb-dhcp.service` | dnsmasq, DHCP only on `usb0`: gives the host 10.12.194.2, no router, no DNS. Replaces NetworkManager's "shared" mode, which turns on IP forwarding and NAT. |
 | `rootfs/etc/systemd/system/roboscope-usb-watchdog.service`, `rootfs/usr/local/lib/roboscope/usb-link-watchdog.sh` | USB link watchdog. Every 10 s, while a host has the gadget configured, it pings 10.12.194.2. After 3 misses it reloads `g_ether`, then backs off (60 s, doubling to 30 min) while the link stays dead. It's a safety net: since rule 87, no cold power-up has needed it (0 of 12). |
+| `rootfs/etc/NetworkManager/conf.d/90-roboscope-wifi-powersave.conf` | Wi-Fi power save off. With it on, pings over Wi-Fi averaged 1.6 s (max 3.3 s); off, 39 ms. That made any Wi-Fi route to the camera unusable. |
 | `rootfs/etc/rpi/swap.conf.d/90-roboscope.conf` | Swap to zram only. The default swap file was re-`mkswap`ed on every boot (~21 s). |
 | `rootfs/etc/cloud/cloud-init.disabled` | cloud-init off after provisioning (~45 s per boot). A fresh card doesn't have this file, so the Imager's first-boot setup still runs. |
 | (from `src/roboscope/camera/`) | The camera server code. Not kept here: the deploy script copies it from the package to the Pi as `roboscope_camera/`. |
@@ -44,7 +45,8 @@ edit config on the Pi directly; edit it here and redeploy.
 - Raspberry Pi OS Lite 32-bit, Trixie (Debian 13), kernel 6.18.60+rpt-rpi-v6. Fully
   upgraded, then provisioned with the files above.
 - Listening: SSH (22) and mDNS (5353) on all interfaces, plus DHCP (67) on `usb0`
-  only. There's no firewall. The Pi sits behind the home router's
+  only, and the camera server (47623) on all interfaces but filtered to loopback and
+  the host Pi's USB address by its systemd unit. There's no other firewall. The Pi sits behind the home router's
   NAT (assumed to have no port forwards to it; not checked), and the OS is supported
   and auto-updating. So it isn't restricted to the LAN; apt needs outbound access.
 - Camera: `rpicam-hello --list-cameras` shows the ov5647. Modes:
@@ -82,20 +84,26 @@ macOS and Linux). Wi-Fi stays up for management and updates.
 - Measured Zero → Mac: plain TCP 14 MB/s (the Zero's CPU is the limit), SSH 4.5 MB/s,
   round trip 0.8 ms. Over Wi-Fi: 0.8–2.6 MB/s plain, ~0.5 MB/s SSH. Details and the
   reboot tests: `documentation/hardware_findings.md` ("2026-11-25 evening: camera Pi USB link…").
-- The camera server still listens only on loopback; reach it through an SSH tunnel over
-  the link. `roboscope.camera.connect()` and `scripts/camera_view.py` pick the USB link
-  automatically when it answers.
-  - Measured from the 3B+ (2026-11-26): raw frame ~0.35 s over USB against 4–22 s over
-    Wi-Fi; `locate` ~0.3 s against 0.5–0.65 s.
+- The host Pi's camera hub fetches frames over the link with plain HTTP (`/api/raw`); see
+  "Camera server". Before the hub, SSH tunnels from the 3B+ over USB gave a raw frame
+  in ~0.35 s, against 4–22 s over the Zero's Wi-Fi (2026-11-26).
 
 ## Camera server
 - `roboscope-camera.service` owns the camera from boot (only one process can). See
   `src/roboscope/camera/server.py` for the API.
-- Reach it from the Mac:
-  - browser: `uv run python scripts/camera_view.py`;
+- **Normal use goes through the hub on the host Pi** (`hardware/host_pi`). The hub
+  fetches frames from this server's `/api/raw` over USB, at the preview's size
+  (`preview_size`: full, half or quarter) and rate, and
+  renders the preview, runs locate and serves the UI. Viewers and roboscope talk to the
+  hub, never to the Zero's Wi-Fi:
+  - browser: `uv run python scripts/camera_view.py`, or `scripts/camera_view_via_host.sh`
+    (plain ssh, for machines without the repo). Both tunnel to the 3B+. The shell
+    script shares its tunnel on the LAN by default, so other computers just browse to
+    the URL it prints;
   - Python: `roboscope.camera.connect()`.
   The page is always at http://127.0.0.1:47623/ (port fixed in `client.PORT`).
-  Both open an SSH tunnel, so nothing listens on the LAN.
+- **Direct, for debugging:** `camera_view.py --host roboscopeCam.local`, or
+  `connect(host="roboscopeCam.local")`, tunnels to this server over the Zero's Wi-Fi.
 - To use the camera directly (e.g. `rpicam-still`), first run
   `sudo systemctl stop roboscope-camera`.
 - Logs: `journalctl -u roboscope-camera`.
@@ -108,12 +116,29 @@ macOS and Linux). Wi-Fi stays up for management and updates.
   - idle mode drops to 1 fps (~5% CPU) after 30 s with no requests and no open
     viewer; the next request wakes it;
   - locate takes ≈ 0.6–0.8 s (1 ms exposure), or ≈ 1.5 s at full resolution;
-  - streaming runs on the Pi, because sending raw frames over Wi-Fi would cost more:
-    SSH over Wi-Fi moves ~0.5–1.5 MB/s (it varies), and a raw binned frame is 630 KB against
-    a ~75 KB preview JPEG (lensless test frames; a dark sky compresses much better);
-  - the preview defaults to 2 fps at JPEG quality 70;
+  - the preview defaults to 2 fps at JPEG quality 70 (rendered by the hub in normal use;
+    this server still renders it for direct viewers);
+  - each preview frame carries a stamp in its bottom-left corner, `#<frame number>
+    <capture time>`. It costs 3.4 ms per frame on the Zero (2026-11-26).
+    - **Through the hub:** frame numbers are the hub's own, and it fetches one frame per
+      preview frame, so the number should rise by 1 per update. At 2 fps the time
+      should rise by 0.5 s.
+    - **Direct to the Zero:** the Zero captures at 10 fps, so about 5 per update.
+    - If the stamp moves like that, the browser is keeping up.
   - the MJPEG preview reaches ≈ 2 fps through the tunnel (on the Zero, preview rendering
-    takes ~90 ms and JPEG encoding ~105 ms per frame).
+    takes ~90 ms and JPEG encoding ~105 ms per frame);
+  - feeding the hub (2026-11-26): binning a frame takes 31 ms and serializing it 6 ms. At
+    4 frames/s with one viewer on the hub, this server used 65% CPU (24% idle). With
+    the hub idle (passive fetches, 1/s), it used ~12%;
+  - **preview size and rate limits** (measured in isolation, twice each): with
+    max-pooled smaller frames (`/api/raw?reduce=2|4`, pooling ~12.5 ms here), and
+    capturing only ~1.1× as fast as the hub fetches (demand-matched capture), the Zero
+    sustains a full-size feed at 6 fps, half at 7 and quarter at 8, each with at least
+    10% of the CPU idle. The hub caps `preview_fps` at these (`RemoteSource.
+    MAX_PREVIEW_FPS`);
+  - at the default (full size, 2 fps, one viewer) the Zero captures at 2.2 fps and is
+    ~62% idle (24% before demand-matched capture). Locate through the hub takes
+    0.4–0.7 s, about 0.15 s slower, because fresh frames are further apart.
 - Sensor facts used by the code:
   - raw SGBRG10 unpacked, right-aligned 0..1023;
   - exposure 0.13 ms to 3.07 s, gain 1 to 63.9;

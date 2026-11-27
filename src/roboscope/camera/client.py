@@ -1,27 +1,28 @@
-"""Host-side client for the camera server, plus the SSH tunnel that reaches it.
+"""Client for the camera server, plus the SSH tunnel that reaches it.
 
 Details:
-    The camera server listens only on the Pi's loopback interface. `connect()` opens an
-    SSH local port forward (`ssh -L 47623:127.0.0.1:47623 max@<host>`, key auth,
-    BatchMode) and returns a `CameraClient` bound to it. Closing the client closes the
-    tunnel.
+    The camera is served in two layers (see `server.py`):
+      - The camera Zero runs the server that owns the camera.
+      - The host Pi (3B+, hostname `roboscope`) runs a second server, the *hub*. It
+        gets frames from the Zero over the USB link (`sources.RemoteSource`), renders
+        the preview, runs locate and serves the UI.
+    Both listen only on their own loopback (the Zero also on the USB link, for the hub
+    alone), so clients reach them locally or through an SSH tunnel.
 
-    With no host given, `pick_host()` chooses the route:
-    - **The USB gadget link (`USB_HOST`, 10.12.194.1)** when its SSH port answers within
-      0.5 s. That is the 3B+ host Pi's normal case, and the Mac's when the Zero is
-      plugged into it.
-    - **Otherwise `roboscopeCam.local`** (Wi-Fi).
-    - **Why USB first:** measured from the 3B+ on 2026-11-26, a raw frame took ~0.35 s
-      over USB against 4-22 s over Wi-Fi, and `locate` 0.3 s against 0.5-0.65 s.
-    The tunnel keeps the server off every network, so nothing new listens on the USB
-    link. The SSH host key must be known for the chosen address.
-    `scripts/deploy_host_pi.sh` records it for both names on the 3B+. `CameraClient(base_url)` also works directly, e.g. against a
-    local `--source synthetic` server in the tests.
+    `connect()` with no host returns a client for the hub:
+      - on the 3B+ itself (hostname HOST_PI), straight to http://127.0.0.1:PORT;
+      - anywhere else, through an SSH local port forward to DEFAULT_HOST
+        (`ssh -L <port>:127.0.0.1:47623 max@roboscope.local`, key auth, BatchMode). So
+        viewers need an SSH key on the 3B+ only, and nothing depends on the Zero's
+        Wi-Fi.
+    `connect(host="roboscopeCam.local")` (or "10.12.194.1" over USB) still reaches the
+    Zero's own server directly, which helps with debugging. `CameraClient(base_url)` also
+    works directly, e.g. against a local `--source synthetic` server in the tests.
 
     `CameraClient.locate()` matches the finder interface `align.AlignmentSession` expects:
     full-sensor pixel (x, y) of the star in a fresh frame, or None. `find_star()` returns
     the whole server result (flux, SNR, saturation, frame metadata).
-    Only stdlib + numpy, so it also imports cleanly on the Pi.
+    Only stdlib + numpy, so it also imports cleanly on the Pis.
 """
 
 import io
@@ -35,8 +36,10 @@ from urllib.parse import urlencode
 
 import numpy as np
 
-DEFAULT_HOST = "roboscopeCam.local"      # Wi-Fi (mDNS); the fallback route
-USB_HOST = "10.12.194.1"                 # the Zero's end of the USB gadget link
+HOST_PI = "roboscope"                    # hostname of the host Pi, which runs the hub
+DEFAULT_HOST = "roboscope.local"         # the hub, as other machines reach it (mDNS)
+CAMERA_PI_HOST = "roboscopeCam.local"    # the Zero's own server, over its Wi-Fi
+USB_HOST = "10.12.194.1"                 # the Zero's end of the USB link (hub's upstream)
 DEFAULT_USER = "max"
 # One fixed, uncommon port (unassigned, checked free on the Mac and the Pi, 2026-11-25),
 # used on both ends: the server on the Pi's loopback and the tunnel's local end, so the
@@ -171,28 +174,16 @@ class CameraClient:
         self.close()
 
 
-def pick_host(timeout_s: float = 0.5) -> str:
-    """The address to reach the camera Pi at: USB_HOST if its SSH port answers, else
-    DEFAULT_HOST.
-
-    A plain TCP connect to port 22, closed at once. It costs at most `timeout_s` when the
-    USB link is absent, which is quick because 10.12.194.0/28 is then unrouted. It
-    doesn't check that SSH will authenticate; SshTunnel reports that.
-    """
-    try:
-        socket.create_connection((USB_HOST, 22), timeout_s).close()
-        return USB_HOST
-    except OSError:
-        return DEFAULT_HOST
-
-
 def connect(host: str | None = None, user: str = DEFAULT_USER,
             remote_port: int = PORT, local_port: int = 0) -> CameraClient:
-    """Open an SSH tunnel to the camera Pi and return a client using it.
+    """A client for the camera hub (or the server on `host`); see module notes.
 
-    `host` None (the default) picks the route with `pick_host()`: the USB link if
-    present, else Wi-Fi. `local_port` 0 (the default here) picks a free port, so scripts
-    can run alongside an open browser view, which holds PORT.
+    `host` None (the default): on the host Pi, connect directly to the local hub with
+    no tunnel; elsewhere, tunnel to DEFAULT_HOST. Any other `host` gets a tunnel to that
+    machine's server. `local_port` 0 (the default here) picks a free port for the
+    tunnel, so scripts can run alongside an open browser view, which holds PORT.
     """
-    t = SshTunnel(host or pick_host(), user, remote_port, local_port)
+    if host is None and socket.gethostname() == HOST_PI:
+        return CameraClient(f"http://127.0.0.1:{remote_port}")
+    t = SshTunnel(host or DEFAULT_HOST, user, remote_port, local_port)
     return CameraClient(f"http://127.0.0.1:{t.local_port}", tunnel=t)

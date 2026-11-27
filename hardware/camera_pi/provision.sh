@@ -29,6 +29,8 @@
 #        usr/local/lib/roboscope/usb-link-watchdog.sh, which reloads g_ether when the
 #        host stops reaching the Pi (a safety net; the one-way link it was written for
 #        is fixed by rule 87).
+#      - etc/NetworkManager/conf.d/90-roboscope-wifi-powersave.conf: Wi-Fi power save
+#        off (with it on, Wi-Fi pings averaged 1.6 s).
 #      - Faster boot: etc/rpi/swap.conf.d/90-roboscope.conf (zram only, no swap file),
 #        etc/cloud/cloud-init.disabled (cloud-init only matters on a fresh card).
 #   3. Validates the sshd config before reloading sshd (a broken config is removed, so
@@ -124,6 +126,11 @@ if [ -e /sys/class/net/usb0 ]; then
     sleep 2                                 # NetworkManager reacts asynchronously
     nmcli -w 10 connection up roboscope-usb0 >/dev/null || echo "  usb0 not up yet" >&2
 fi
+
+echo "== Wi-Fi: power save off"
+# Global conf.d settings are read on reload; the active connection picks them up the next
+# time it (re)activates, at the latest at the next boot.
+nmcli general reload conf
 
 echo "== Wi-Fi: netplan -> NetworkManager keyfile"
 # The Imager's Wi-Fi settings land in netplan (/etc/netplan/90-NM-*.yaml). On every boot

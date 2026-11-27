@@ -7,6 +7,10 @@ Details:
       - `capture()`: block for the next `Frame`;
       - `set_idle(bool)`: slow the frame rate while nobody uses the camera (the
         server decides when; see server.py);
+      - optional `set_max_fps(fps)`: cap the capture rate below the source's own
+        maximum. The server uses it to capture only as fast as a downstream hub
+        fetches, because capturing frames nobody uses cost the Zero ~46% of its CPU at
+        10 fps (2026-11-26). PicameraSource and SyntheticSource have it.
       - `now_ns()`: the clock that `Frame.start_ns` uses;
       - `info()`: a dict describing the camera.
     Only the server's capture thread calls them, so sources need not be thread-safe.
@@ -31,9 +35,16 @@ Details:
       scaled by exposure × gain. Clipped like the real sensor. New settings take effect
       after a frame of latency, like real hardware. Used by the tests and for running
       the server and UI on the host (`--source synthetic`).
+    - `RemoteSource`: frames from *another* camera server, fetched from its `/api/raw`
+      endpoint. The host Pi (3B+) runs a server with this source (`--source remote`)
+      against the camera Zero's server over the USB link. The 3B+ then renders the
+      preview, runs locate and serves the UI, and the Zero only captures, bins and sends
+      frames. Details are in the class docstring.
 """
 
+import json
 import time
+import urllib.request
 from dataclasses import asdict, dataclass, field
 
 import numpy as np
@@ -41,6 +52,10 @@ import numpy as np
 from .starfind import bin_bayer
 
 MODES = ("binned", "full")
+# Preview sizes and their reduction of the analysis grid per axis (max-pooled, so stars
+# survive). Through the hub, frames arrive from the Zero already reduced, which is what
+# lets the preview run faster.
+PREVIEW_SIZES = {"full": 1, "half": 2, "quarter": 4}
 
 
 @dataclass
@@ -55,6 +70,7 @@ class CameraSettings:
     crosshair: bool = True                 # display only
     preview_fps: float = 2.0               # cap for the MJPEG stream (Pi CPU)
     preview_width: int = 648               # JPEG width for the stream
+    preview_size: str = "full"             # "full" | "half" | "quarter" (PREVIEW_SIZES)
 
     def updated(self, changes: dict) -> "CameraSettings":
         """A copy with `changes` applied and validated (not clamped; see CameraServer).
@@ -72,6 +88,8 @@ class CameraSettings:
             raise ValueError(f"mode must be one of {MODES}")
         if s.stretch not in ("auto", "manual"):
             raise ValueError("stretch must be 'auto' or 'manual'")
+        if s.preview_size not in PREVIEW_SIZES:
+            raise ValueError(f"preview_size must be one of {tuple(PREVIEW_SIZES)}")
         # Only reject nonsense here; the server clamps to the camera's actual limits.
         if not (s.exposure_ms > 0 and s.gain > 0):
             raise ValueError("exposure_ms and gain must be > 0")
@@ -99,7 +117,7 @@ class Frame:
     and binning every one kept the CPU saturated (measured 2026-11-25).
     """
     image_: np.ndarray | None
-    scale: int                 # full-sensor px per analysis px (per axis)
+    scale: int                 # full-sensor px per pixel of `image` (per axis; includes reduce)
     seq: int
     start_ns: int              # exposure start, in the source's now_ns() clock
     exposure_us: float         # as reported by the camera for this frame
@@ -107,6 +125,7 @@ class Frame:
     saturation: float          # analysis-grid value at/above which pixels are clipped
     wall_time: float = field(default_factory=time.time)
     raw: np.ndarray | None = None
+    reduce: int = 1            # extra max-pool factor already applied (1 = full grid)
 
     @property
     def image(self) -> np.ndarray:
@@ -140,9 +159,15 @@ class SyntheticSource:
         self._pending: CameraSettings | None = None
         self._seq = 0
         self._t0 = time.monotonic_ns()
+        self._min_period_s = 0.0              # from set_max_fps (0 = uncapped)
+        self._last_start = 0.0
 
     def now_ns(self) -> int:
         return time.monotonic_ns() - self._t0
+
+    def set_max_fps(self, fps: float | None) -> None:
+        """Cap the frame rate (None: uncapped, as before)."""
+        self._min_period_s = 1.0 / fps if fps else 0.0
 
     def info(self) -> dict:
         return {"model": "synthetic", "sensor_size": list(self.SENSOR),
@@ -158,6 +183,10 @@ class SyntheticSource:
         s = self._settings
         scale = 4 if s.mode == "binned" else 2
         w, h = self.SENSOR[0] // scale, self.SENSOR[1] // scale
+        wait = self._last_start + self._min_period_s - time.monotonic()
+        if wait > 0:                          # set_max_fps cap
+            time.sleep(wait)
+        self._last_start = time.monotonic()
         start = self.now_ns()
         time.sleep(min(s.exposure_ms / 1000, 2.0) + 0.02)
         sx, sy = self.star_xy
@@ -194,6 +223,7 @@ class PicameraSource:
         self._mode = None
         self._settings: CameraSettings | None = None
         self._idle = False
+        self._max_fps: float | None = None    # from set_max_fps (None: MIN_FRAME_US)
         self._seq = 0
         self.white = 1023 * 4                 # 10-bit clip × 4 pixels per 2×2 cell
 
@@ -229,6 +259,17 @@ class PicameraSource:
         self._settings = settings
         self._apply_controls()
 
+    def set_max_fps(self, fps: float | None) -> None:
+        """Cap the capture rate at `fps` (None: back to 1/MIN_FRAME_US = 10 fps).
+
+        Takes effect like other controls, about 3 frames later. Only re-applies the
+        controls when the cap actually changes.
+        """
+        if fps != self._max_fps:
+            self._max_fps = fps
+            if self._settings is not None:
+                self._apply_controls()
+
     def set_idle(self, idle: bool) -> None:
         """Idle: stretch the frame period to IDLE_FRAME_US (exposure unchanged)."""
         self._idle = idle
@@ -242,6 +283,8 @@ class PicameraSource:
         # IDLE_FRAME_US when idle). Uncapped, the binned mode ran at ~15 fps and the
         # Zero's CPU was saturated by capture alone, which slowed every locate.
         floor = self.IDLE_FRAME_US if self._idle else self.MIN_FRAME_US
+        if self._max_fps and not self._idle:  # set_max_fps: slower than 10 fps
+            floor = max(floor, int(1e6 / self._max_fps))
         period = max(exp_us, floor)
         self.cam.set_controls({
             "AeEnable": False, "AwbEnable": False,
@@ -270,3 +313,147 @@ class PicameraSource:
     def close(self) -> None:
         self.cam.stop()
         self.cam.close()
+
+
+class RemoteSource:
+    """Frames from another camera server (normally the Zero's, over USB); see module notes.
+
+    Args:
+        base_url: the upstream server, e.g. "http://10.12.194.1:47623".
+        idle_pull_s: seconds between fetches while idle.
+        timeout_s: HTTP timeout on top of 3 × the exposure.
+
+    How it works:
+        - `capture()` asks `/api/raw?after=<last upstream seq>&reduce=k` for the next
+          frame the upstream captured, so frames are skipped rather than repeated.
+          - The size k comes from the server's `preview_size`.
+          - Fetches are paced to its `preview_fps`, which the server caps at
+            `max_preview_fps(size)` (MAX_PREVIEW_FPS, measured on the Zero).
+          - Each active fetch also sends `fps=<preview_fps>`, so the upstream caps its
+            capture rate to match (demand-matched capture, server.py).
+        - **Full frames on demand:** while the server sets `want_full` (a locate or a raw
+          download is waiting for a fresh full-resolution frame), fetches are full size
+          (k=1) and unpaced. So star positions keep full accuracy whatever the preview
+          size.
+        - Frames get this source's own sequence numbers (1, 2, 3, …), because the
+          upstream's restart from 1 whenever its server restarts. That would stall
+          `wait_next` and MJPEG viewers here.
+        - After any failed fetch, it forgets the upstream sequence number, so the next
+          fetch takes the upstream's latest frame. A restarted upstream (new numbering)
+          or a dropped link then recovers by itself. Found 2026-11-26: the hub kept
+          asking for frames after the old number and got only timeouts. It also sends
+          its sensor settings again before the next fetch, because a restarted upstream
+          comes back with defaults, and locate would wait for frames matching this
+          server's settings.
+        - While idle, it fetches with `passive=1`, which doesn't count as activity
+          upstream, so the Zero can drop to its own idle frame rate.
+        - `configure()` forwards only the sensor settings (mode, exposure_ms, gain) to
+          the upstream's `/api/settings`. Display settings stay with this server.
+        - `now_ns()` estimates the upstream's clock (which `Frame.start_ns` uses) from
+          the `X-Now-Ns` header of each response, as a safe upper bound:
+          upstream_now - local_send_time. A frame is therefore never judged fresher
+          than it is; at worst, a locate waits for one more frame.
+        - The upstream's settings can also be changed directly (by a client tunnelled
+          to the Zero). The next `configure()` here overwrites them, but until then
+          this server's settings and the frames can disagree, and locate would wait
+          until they match.
+
+    Raises (from capture/configure/info): OSError, urllib errors, or ValueError on a
+    malformed response. The server's capture loop logs them and retries after 1 s.
+    """
+
+    SENSOR_KEYS = ("mode", "exposure_ms", "gain")
+    # Highest preview rate per preview size that the Zero sustains while feeding this
+    # source over USB (binned mode), with demand-matched capture. Measured 2026-11-26
+    # from the 3B+, each rate in isolation and twice (hardware_findings.md, "preview size
+    # and fps limits" and "demand-matched capture"). Rule: delivered at 97% or better
+    # of target with at least 10% of the Zero's CPU idle in both repeats. One half/7
+    # repeat fell short while the Zero woke from idle mode, with 27% CPU free, so it is
+    # counted as a wake-up delay, not a capacity limit. The next rate up failed: full 7
+    # (6-8% idle), half 8 (9% idle once), quarter 9 (8% idle).
+    MAX_PREVIEW_FPS = {"full": 6.0, "half": 7.0, "quarter": 8.0}
+
+    def __init__(self, base_url: str, idle_pull_s: float = 1.0, timeout_s: float = 10.0):
+        self.base_url = base_url.rstrip("/")
+        self.idle_pull_s, self.timeout_s = idle_pull_s, timeout_s
+        self.want_full = False                # set by the server's capture loop
+        self._seq = 0                         # this source's frame numbers
+        self._up_seq = -1                     # last upstream seq fetched (-1: take latest)
+        self._idle = False
+        self._last_pull = 0.0
+        self._exposure_ms = 10.0
+        self._settings: CameraSettings | None = None   # last sensor settings sent
+        self._resend = False                  # send them again before the next fetch
+        self._offset_ns: int | None = None    # upstream clock - local monotonic (bound)
+        self._info: dict | None = None
+
+    def _get(self, path: str, timeout_s: float):
+        t_send = time.monotonic_ns()
+        r = urllib.request.urlopen(self.base_url + path, timeout=timeout_s)
+        now = r.headers.get("X-Now-Ns")
+        if now is not None:                   # tightest upper bound seen so far
+            off = int(now) - t_send
+            self._offset_ns = off if self._offset_ns is None else min(self._offset_ns, off)
+        return r
+
+    def now_ns(self) -> int:
+        if self._offset_ns is None:
+            self._get("/api/status", self.timeout_s).close()
+        return time.monotonic_ns() + self._offset_ns
+
+    def info(self) -> dict:
+        if self._info is None:
+            with self._get("/api/status", self.timeout_s) as r:
+                up = json.load(r)["info"]
+            self._info = {**up, "via": self.base_url}
+        return self._info
+
+    def max_preview_fps(self, preview_size: str) -> float:
+        """The server's cap on preview_fps for this preview size (see MAX_PREVIEW_FPS)."""
+        return self.MAX_PREVIEW_FPS[preview_size]
+
+    def configure(self, settings: CameraSettings) -> None:
+        body = json.dumps({k: getattr(settings, k) for k in self.SENSOR_KEYS}).encode()
+        req = urllib.request.Request(self.base_url + "/api/settings", data=body,
+                                     headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=self.timeout_s).close()
+        self._settings, self._resend = settings, False
+        self._exposure_ms = settings.exposure_ms
+
+    def set_idle(self, idle: bool) -> None:
+        self._idle = idle
+
+    def capture(self) -> Frame:
+        s = self._settings or CameraSettings()
+        full = self.want_full
+        if not full:                          # a waiting locate isn't held back by pacing
+            period = self.idle_pull_s if self._idle else 1.0 / s.preview_fps
+            wait = self._last_pull + period - time.monotonic()
+            if wait > 0:
+                time.sleep(wait)
+        self._last_pull = time.monotonic()
+        k = 1 if full else PREVIEW_SIZES[s.preview_size]
+        wait_s = 3 * self._exposure_ms / 1000 + 5
+        # fps: our fetch rate, so the upstream captures only about that fast.
+        q = (f"/api/raw?after={self._up_seq}&timeout_s={wait_s:g}&reduce={k}"
+             + ("&passive=1" if self._idle else f"&fps={s.preview_fps:g}"))
+        try:
+            if self._resend and self._settings is not None:
+                self.configure(self._settings)
+            with self._get(q, wait_s + self.timeout_s) as r:
+                h = r.headers
+                body = r.read()
+            shape = tuple(int(v) for v in h["X-Shape"].split(","))
+            image = np.frombuffer(body, dtype="<u2").reshape(shape)
+            self._up_seq = int(h["X-Seq"])
+        except Exception:
+            self._up_seq = -1                 # upstream restarted or link dropped
+            self._resend = True
+            raise
+        self._seq += 1
+        return Frame(image, int(h["X-Scale"]), self._seq, int(h["X-Start-Ns"]),
+                     float(h["X-Exposure-Us"]), float(h["X-Gain"]), float(h["X-Saturation"]),
+                     wall_time=float(h["X-Wall-Time"]), reduce=int(h.get("X-Reduce", 1)))
+
+    def close(self) -> None:
+        pass

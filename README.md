@@ -8,8 +8,9 @@ the mount's backlash, slip and alignment errors.
 **Status:** Stage 1 in progress. Both axes are driven by our own Arduino-based motor
 controller (no handbox): regulated speed, encoder positions and firmware safety limits
 are verified on hardware. The sky model and star alignment work in simulation. The
-camera Pi's server (raw frames, star centroids, browser live view) runs on hardware,
-but hasn't seen a star yet because no optics are attached. Next: the mount adapter that
+camera (raw frames, star centroids, browser live view) runs on hardware: the Zero
+captures and the host Pi (3B+) serves it. It hasn't seen a star yet because no optics
+are attached. Next: the mount adapter that
 connects alignment to the real motors.
 See [documentation/PLAN.md](documentation/PLAN.md) and
 [documentation/hardware_findings.md](documentation/hardware_findings.md).
@@ -44,18 +45,20 @@ with Mount.connect("/dev/tty.usbserial-XXXX") as m:
     print(m.info(), m.radec(), m.altaz())
 ```
 
-Camera Pi live view and settings in the browser (through an SSH tunnel; the camera
-server runs on the Pi as a service):
+Camera live view and settings in the browser, through an SSH tunnel to the camera hub
+on the host Pi (3B+), which gets frames from the camera Zero over USB:
 ```sh
 uv run python scripts/camera_view.py            # http://127.0.0.1:47623/
 uv run python scripts/camera_view.py --synthetic  # simulated camera, no Pi needed
-scripts/deploy_camera_pi.sh                      # push Pi config + camera server
+scripts/camera_view_via_host.sh                  # same tunnel with plain ssh, shared on the LAN
+scripts/deploy_camera_pi.sh <Zero IP>            # push Zero config + camera server
+scripts/deploy_host_pi.sh --code-only <3B+ IP>   # push code to the 3B+, restart the hub
 ```
 
 From Python:
 ```python
 from roboscope.camera import connect
-with connect() as cam:                     # SSH tunnel to roboscopeCam.local
+with connect() as cam:                     # the hub: direct on the 3B+, else SSH tunnel
     cam.set(exposure_ms=50, gain=4)
     print(cam.find_star())                 # centroid in full-sensor px, SNR, ...
 ```
@@ -113,19 +116,26 @@ with connect() as cam:                     # SSH tunnel to roboscopeCam.local
     hardware terms from here and keep them fixed, so a nightly alignment only solves
     the setup (zero offsets, tilt).
 - `roboscope.camera`: the narrow camera.
-  - The server (`server.py`) runs on the camera Pi as `roboscope-camera.service`. It
-    owns the camera (picamera2, raw 10-bit Bayer, manual exposure/gain, 2×2-summed
-    linear frames) and finds the star there (`starfind.py`, numpy only), so only
-    coordinates need to cross the network. It has an HTTP API (`/api/locate`, `/api/settings`,
-    `/api/frame.npy`, …) and an MJPEG browser UI.
-  - It binds to loopback only. The host reaches it through an SSH tunnel, over the
-    Zero's USB link when present (raw frame ~0.4 s from the 3B+), else Wi-Fi:
-    `CameraClient` (`client.py`), whose `locate()` is `AlignmentSession`'s star
-    finder, and `scripts/camera_view.py` for the browser.
+  - One server (`server.py`, HTTP API: `/api/locate`, `/api/settings`,
+    `/api/frame.npy`, `/api/raw`, …, plus an MJPEG browser UI) runs in two roles:
+    - **On the camera Zero** (`--source pi`): owns the camera (picamera2, raw 10-bit
+      Bayer, manual exposure/gain, 2×2-summed linear frames) and offers each frame on
+      `/api/raw`. Its systemd unit filters traffic, so only the Zero itself and the
+      3B+ over USB can connect.
+    - **On the host Pi** (`--source remote`, the *hub*): fetches frames from the Zero
+      over USB (`RemoteSource`), at the preview's size and rate (`preview_size`, with
+      measured per-size fps limits), renders the preview, finds the star
+      (`starfind.py`, numpy only) and serves the UI. Loopback only.
+  - Clients use the hub: `CameraClient` (`client.py`), whose `locate()` is
+    `AlignmentSession`'s star finder (`connect()`: direct on the 3B+, SSH tunnel to
+    `roboscope.local` elsewhere), and `scripts/camera_view.py` /
+    `camera_view_via_host.sh` for the browser. The latter shares its tunnel on the LAN
+    by default (no login; `--private` turns that off). No viewer depends on the Zero's
+    slow Wi-Fi.
   - The same files deploy to the Pi as package `roboscope_camera`, so they use relative
     imports and need only numpy and the stdlib.
   - `SyntheticSource` simulates the camera for tests and for running the UI without
-    the Pi.
+    the Pis. `tests/test_camera_remote.py` runs the Zero → hub chain in one process.
 - Planned packages: `motion` (backlash-aware moves, hardware adapters), `solve`,
   `safety` (see the plan). The whole package will run on a Raspberry Pi attached to the telescope.
 - `tests/`: pytest suite. Protocol conversions, plus the driver against the simulator.
@@ -161,9 +171,11 @@ with connect() as cam:                     # SSH tunnel to roboscopeCam.local
   `provision.sh` are applied by `scripts/deploy_host_pi.sh`:
   - key-only SSH, automatic updates, Bluetooth off and boot trims;
   - a static address on the camera link;
-  - uv, and an SSH key authorized on the Zero.
+  - uv, and an SSH key authorized on the Zero;
+  - the camera hub, a user service (`roboscope.camera.server --source remote`).
 
-  The same script syncs the repo to `~/roboscope` on the Pi and runs `uv sync`.
+  The same script syncs the repo to `~/roboscope` on the Pi, runs `uv sync` and
+  restarts the hub.
   Its power supply is still marginal (see its README).
 - `notebooks/`: numbered exploration notebooks for hardware bring-up and experiments.
 - `documentation/`:

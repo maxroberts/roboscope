@@ -1,9 +1,14 @@
 <!doctype html>
 <!--
   roboscope camera viewer, served by roboscope.camera.server at "/".
-  Shows the MJPEG preview, lets the user change CameraSettings (POST /api/settings),
+  Shows the MJPEG preview (scaled to the panel width, so a reduced preview_size stays
+  large on screen), lets the user change CameraSettings (POST /api/settings),
   run a star locate (GET /api/locate), download a snapshot or a raw .npy frame, and
-  polls /api/status every 2 s. Dark, dim-red theme ("night") by default to keep the
+  polls /api/status every 2 s. Two error lines: a rejected setting stays shown until
+  the next accepted change; below it, the camera's current capture error (status
+  last_error, empty once captures succeed again) or a failed status poll. When the server limits preview fps per preview size
+  (status.max_preview_fps, the hub), the limit for the chosen size is shown next to
+  the fps box, and the server clamps requests to it. Dark, dim-red theme ("night") by default to keep the
   observer's dark adaptation; the "day" toggle switches to a neutral theme.
 -->
 <html lang="en">
@@ -19,7 +24,7 @@
   main { display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:12px; padding:12px; }
   @media (max-width:900px) { main { grid-template-columns:1fr; } }
   .view { background:#000; border:1px solid var(--line); display:flex; align-items:center; justify-content:center; min-height:300px; }
-  .view img { max-width:100%; height:auto; image-rendering:pixelated; display:block; }
+  .view img { width:100%; height:auto; image-rendering:pixelated; display:block; }
   body:not(.day) .view img { filter: sepia(1) saturate(6) hue-rotate(-50deg) brightness(.8); }
   aside { display:flex; flex-direction:column; gap:12px; }
   section { background:var(--panel); border:1px solid var(--line); padding:10px; }
@@ -52,7 +57,8 @@
       <label>Black <input id="black" type="number" step="any"></label>
       <label>White <input id="white" type="number" step="any"></label>
       <label>Crosshair <input id="crosshair" type="checkbox"></label>
-      <label>Preview fps <input id="preview_fps" type="number" min="0.1" max="30" step="0.5"></label>
+      <label>Preview size <select id="preview_size"><option value="full">full</option><option value="half">half</option><option value="quarter">quarter</option></select></label>
+      <label>Preview fps <input id="preview_fps" type="number" min="0.1" max="30" step="0.5"> <span id="fps_max"></span></label>
       <label>Theme <button id="theme" type="button">day</button></label>
     </section>
     <section>
@@ -67,13 +73,14 @@
     <section>
       <h2>Status</h2>
       <dl id="status"></dl>
+      <div id="set_error" class="err"></div>
       <div id="error" class="err"></div>
     </section>
   </aside>
 </main>
 <script>
 const $ = id => document.getElementById(id);
-const fields = ["mode","exposure_ms","gain","stretch","black","white","crosshair","preview_fps"];
+const fields = ["mode","exposure_ms","gain","stretch","black","white","crosshair","preview_size","preview_fps"];
 
 function show(s) {
   for (const k of fields) {
@@ -85,8 +92,9 @@ function show(s) {
 async function send(changes) {
   const r = await fetch("/api/settings", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(changes)});
   const j = await r.json();
-  if (!r.ok) { $("error").textContent = j.error; return; }
-  $("error").textContent = ""; show(j);
+  // Its own line: the status poll rewrites #error every 2 s and would hide this.
+  if (!r.ok) { $("set_error").textContent = "setting rejected: " + j.error; return; }
+  $("set_error").textContent = ""; show(j);
 }
 for (const k of fields) $(k).addEventListener("change", e => {
   const el = e.target, v = el.type === "checkbox" ? el.checked : (el.type === "number" ? Number(el.value) : el.value);
@@ -119,6 +127,9 @@ async function poll() {
   try {
     const s = await (await fetch("/api/status")).json();
     show(s.settings);
+    const cap = s.max_preview_fps && s.max_preview_fps[s.settings.preview_size];
+    $("fps_max").textContent = cap ? `max ${cap}` : "";
+    $("preview_fps").max = cap || 30;
     const f = s.frame || {};
     list($("status"), {camera: s.info.model, "capture fps": s.fps, idle: String(s.idle), frame: f.seq, "age s": f.age_s,
       "exposure ms": f.exposure_us != null ? f.exposure_us / 1000 : null, gain: f.gain,

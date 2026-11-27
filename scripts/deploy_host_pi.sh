@@ -11,8 +11,8 @@
 #      (the USB link) and roboscopeCam.local. The Zero's key is read from the Zero over
 #      the Mac's own trusted SSH connection, so the 3B+ never trusts it blindly.
 #   3. code: rsyncs the repo (without .venv, .git and caches; with data/, the sky
-#      catalog and ephemeris the tests need) to ~/roboscope on the 3B+, then runs
-#      `uv sync --dev` there. Files deleted from the repo are deleted on the Pi too,
+#      catalog and ephemeris the tests need) to ~/roboscope on the 3B+, runs
+#      `uv sync --dev` there, then restarts the camera hub (a user service, so no sudo). Files deleted from the repo are deleted on the Pi too,
 #      except under data/, where the Pi may keep files of its own (logs, frames).
 # The repo is the source of truth: edit files here, then re-run this script.
 #
@@ -57,5 +57,9 @@ rsync -a --delete --exclude .venv --exclude .git --exclude __pycache__ \
     --exclude .pytest_cache --exclude .ipynb_checkpoints --exclude .DS_Store \
     --filter 'P data/***' \
     -e "ssh -o BatchMode=yes" "$ROOT/" "$USER_ON_PI@$HOST:roboscope/"
-"${SSH[@]}" "$USER_ON_PI@$HOST" 'cd roboscope && ~/.local/bin/uv sync --dev'
+"${SSH[@]}" "$USER_ON_PI@$HOST" 'cd roboscope && ~/.local/bin/uv sync --dev \
+    && systemctl --user daemon-reload \
+    && if systemctl --user -q is-enabled roboscope-camera.service; then
+           systemctl --user restart roboscope-camera.service && echo "camera hub restarted"
+       else echo "camera hub not enabled (run the full deploy first)"; fi'
 echo "deploy done"

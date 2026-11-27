@@ -45,12 +45,22 @@ experimental results are in `documentation/hardware_findings.md`.
 - `scripts/deploy_camera_pi.sh [host]`: push `hardware/camera_pi/` config and the camera
   server (`src/roboscope/camera`) to the camera Pi and run its idempotent
   `provision.sh` (sudo password prompt). Redeploy after any change to
-  `src/roboscope/camera`.
+  `src/roboscope/camera`, and also push the code to the 3B+ (`deploy_host_pi.sh
+  --code-only`), whose camera hub runs the same package.
 - `scripts/deploy_host_pi.sh [--code-only] [host] [camera_host]`: provision the 3B+
   from `hardware/host_pi/` (sudo password prompt), link it to the Zero, sync the repo
   to `~/roboscope` there and `uv sync`. `--code-only` syncs code only.
+- `scripts/camera_view_via_host.sh [--private] [host_pi]`: live view through an SSH
+  tunnel to the camera hub on the 3B+, with plain ssh (no repo needed). By default the
+  tunnel is open to the LAN (user's choice), so other computers just browse to
+  http://<this machine's IP>:47623/ with no key; anyone on the LAN can then change
+  camera settings while it runs. `--private` = loopback only.
 - `uv run python scripts/camera_view.py [--synthetic]`: camera live view and settings in
-  the browser, via an SSH tunnel. The server is `roboscope-camera.service` on the Pi.
+  the browser, via an SSH tunnel to the camera hub on the 3B+ (`--host
+  roboscopeCam.local` for the Zero's own server). Camera architecture: the Zero
+  (`roboscope-camera` system service) captures and serves raw frames to the 3B+ only,
+  over USB; the 3B+'s hub (`systemctl --user` service `roboscope-camera`) renders,
+  locates and serves.
 - `roboscope.camera` also runs on the Pi as `roboscope_camera`: relative imports only,
   numpy + stdlib only. Keep numpy work integer-typed there (ARMv6 is slow).
 - `uv run python scripts/probe_mount.py --port <dev> [--repeat N] [-v]`: read-only

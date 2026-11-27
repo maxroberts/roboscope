@@ -20,6 +20,8 @@
 #        link to the camera Zero, static 10.12.194.2/28, bound to the gadget's MAC.
 #      - Faster boot: etc/rpi/swap.conf.d/90-roboscope.conf (zram only, no swap file),
 #        etc/cloud/cloud-init.disabled (cloud-init only matters on a fresh card).
+#      - etc/systemd/user/roboscope-camera.service: the camera hub, a user service for
+#        the login user (frames from the Zero over USB; preview, locate and UI here).
 #      - etc/systemd/journald.conf.d/90-roboscope.conf: journal kept on the SD card
 #        (max 100 MB), so power events and unclean resets can be traced after a reboot.
 #   3. Validates the sshd config before reloading sshd (a broken config is removed, so
@@ -29,8 +31,10 @@
 #   6. Moves the Wi-Fi connection out of netplan into a NetworkManager keyfile (same
 #      step as hardware/camera_pi/provision.sh; there it saved ~55 s of every boot).
 #   7. For the login user ($SUDO_USER, normally max): installs uv (official installer,
-#      into ~/.local/bin) if missing, and creates an SSH key (~/.ssh/id_ed25519) if
-#      missing. deploy_host_pi.sh then authorizes that key on the camera Zero.
+#      into ~/.local/bin) if missing, creates an SSH key (~/.ssh/id_ed25519) if missing
+#      (deploy_host_pi.sh then authorizes it on the camera Zero), turns on linger and
+#      enables the camera hub user service. deploy_host_pi.sh (re)starts the hub after
+#      syncing the code, which the hub needs.
 # Reboot is left to the caller; the script prints whether one is needed.
 # Not handled here (known gap): the 3B+'s marginal power supply (see
 # documentation/hardware_findings.md, 2026-11-26).
@@ -124,6 +128,13 @@ if [ ! -f "$HOME_DIR/.ssh/id_ed25519" ]; then
         -f "$HOME_DIR/.ssh/id_ed25519"
 fi
 echo "  key: $(cat "$HOME_DIR/.ssh/id_ed25519.pub")"
+# Linger keeps the user's systemd manager running from boot, so user services (the
+# camera hub) run without a login, and SSH logins don't wait for it to start.
+loginctl enable-linger "$PI_USER"
+uid=$(id -u "$PI_USER")
+for _ in $(seq 1 20); do [ -S "/run/user/$uid/bus" ] && break; sleep 0.5; done
+sudo -u "$PI_USER" XDG_RUNTIME_DIR="/run/user/$uid" systemctl --user daemon-reload
+sudo -u "$PI_USER" XDG_RUNTIME_DIR="/run/user/$uid" systemctl --user enable roboscope-camera.service 2>&1 | grep -v "^Created symlink" || true
 
 echo "== unattended-upgrades dry run"
 unattended-upgrade --dry-run 2>&1 | grep -E 'Allowed origins|No packages|Packages that will be upgraded' || true
