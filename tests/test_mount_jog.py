@@ -11,7 +11,8 @@ Details:
       - not connected (no device) and firmware refusals (uncalibrated) are reported;
       - calibrate() runs CAL;
       - the camera server: /api/status says whether there is a mount, /api/mount*
-        work with one (400 for bad input, 409 for refusals) and 404 without.
+        work with one (400 for bad input, 409 for refusals) and 404 without;
+      - the hub waits for its upstream camera before opening the mount.
 """
 
 import json
@@ -146,3 +147,22 @@ def test_server_without_mount_has_no_mount_api():
         assert _post(base + "/api/mount/jog", {"axis": "az", "direction": 1, "speed": 1})[0] == 404
     finally:
         srv.stop()
+
+
+def test_hub_waits_for_upstream_before_opening_mount():
+    # main() calls wait_for_upstream before make_mount, so a booting Zero makes the hub
+    # wait instead of crash-looping (and resetting the Uno on every restart).
+    from roboscope.camera.server import wait_for_upstream
+
+    class Booting:
+        base_url, calls = "http://zero", 0
+
+        def info(self):
+            self.calls += 1
+            if self.calls < 3:
+                raise OSError("No route to host")
+            return {}
+
+    src = Booting()
+    wait_for_upstream(src, retry_s=0)
+    assert src.calls == 3

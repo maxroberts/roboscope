@@ -84,7 +84,8 @@ with connect() as cam:                     # the hub: direct on the 3B+, else SS
   - `jog.py`: `MountJog`, hold-to-move steering for the camera page (the hub's
     `--mount /dev/ttyACM0`). The page sends jog heartbeats while a button is held; an
     axis without one for 0.6 s is stopped. Speed in °/s (default 1, capped at the
-    firmware's 6500 counts/s: Az 2.11, Alt 1.54 °/s; raised from 1300 on 2026-11-26).
+    firmware's 12000 counts/s: Az 3.89, Alt 2.84 °/s; raised from 1300 to 6500 on
+    2026-11-26 and to 12000 on 2026-11-27, see `documentation/mount_speed_limits.md`).
     The presets are the AudioStar handbox's speeds 1–8 (NG manual). For this supervised tool the
     user lifted both soft limits and chose no Sun check (2026-11-26).
   - The handbox path (`driver.py`) is kept for reference and diagnostics. With it, the
@@ -157,7 +158,10 @@ with connect() as cam:                     # the hub: direct on the 3B+, else SS
   occasionally after a firmware upload. Hosts should call
   `MotorController.wait_healthy()` before moving: usually instant, ~5 s after a
   recovery. Its command protocol
-  is in the sketch header. Bench tests: `scripts/mc_bench_test.py`.
+  is in the sketch header. Bench tests: `scripts/mc_bench_test.py` (safety features
+  and slow moves) and `scripts/mc_speed_test.py` (a ladder of speeds up to the cap on
+  each axis, both directions: speed held, run-on after STOP, events; legs ≤ 5°,
+  limits ±9.5°; log in `data/mc_speed_*.log`).
 - `firmware/hbx_probe/`: diagnostic Uno sketch that drives the NG's motor boards directly
   over the HBX motor bus, with no handbox: handshake, motor type, status, and a
   time-capped `pulse` slew, encoder LED read/calibration, and regulated-speed `run`.
@@ -192,6 +196,9 @@ with connect() as cam:                     # the hub: direct on the 3B+, else SS
   - `telescope_interface.md`: every input and output of the telescope (ports, LX200
     commands, motor bus), with what's been verified.
   - `hardware_findings.md`: dated experimental results.
+  - `mount_speed_limits.md`: how fast the mount can safely be driven (Meade's figures,
+    EQMOD-ETX, our step-up test), and why `MAX_DELTA` makes ~12,000 counts/s the
+    firmware's ceiling.
   - `pi_techniques.md`: Raspberry Pi techniques used here, with commands. They include
     USB power switching (`uhubctl`), power-supply checks (`get_throttled`), USB gadget
     networking, udev triggers and boot diagnostics.

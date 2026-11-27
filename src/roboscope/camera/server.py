@@ -14,6 +14,9 @@ Details:
     With `--mount DEVICE` (the hub: the Uno at /dev/ttyACM0; or `sim`), the page also
     steers the mount: hold-to-move buttons through /api/mount*, handled by
     roboscope.mount.jog.MountJog (dead man's switch, speed cap; see there).
+    At startup with `--source remote`, `main()` waits for the Zero to answer
+    (`wait_for_upstream`) before it opens the mount, because opening the port resets the
+    Uno and a crash-looping hub reset it repeatedly while the motor boards booted.
     Clients reach the hub (or any of these) locally or through an SSH tunnel
     (`client.connect`, `scripts/camera_view.py`). SSH keys are the only access control.
 
@@ -615,6 +618,27 @@ def make_mount(device: str):
     return MountJog(lambda: MotorController.open(device, counts_per_degree=cpd))
 
 
+def wait_for_upstream(source, retry_s: float = 3.0) -> None:
+    """Block until a RemoteSource's upstream (the Zero) answers `/api/status`.
+
+    Used by `main()` on the hub so that a Zero that is still booting makes the hub wait,
+    rather than exit and be restarted by systemd (and reopen the Uno's port) every few
+    seconds. Logs the first failure and every tenth after it; never gives up.
+    """
+    n = 0
+    while True:
+        try:
+            source.info()
+            if n:
+                log.info("upstream %s answered after %d tries", source.base_url, n + 1)
+            return
+        except (OSError, ValueError) as e:
+            if n % 10 == 0:
+                log.warning("waiting for upstream %s: %s", source.base_url, e)
+            n += 1
+            time.sleep(retry_s)
+
+
 def main(argv=None) -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--source", choices=("pi", "synthetic", "remote"), default="pi")
@@ -640,6 +664,11 @@ def main(argv=None) -> None:
         source = RemoteSource(a.remote_url)
     else:
         source = SyntheticSource()
+    if a.source == "remote":
+        wait_for_upstream(source)
+    # The mount is opened only once the camera is reachable. Opening the port resets the
+    # Uno, and before this ordering the hub crash-looped while the Zero booted, resetting
+    # the Uno ~8 times as the motor boards came up (hardware_findings.md, 2026-11-27).
     mount = make_mount(a.mount) if a.mount else None
     srv = CameraServer(source, a.host, a.port, quality=a.quality, mount=mount).start()
     try:

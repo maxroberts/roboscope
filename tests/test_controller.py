@@ -3,7 +3,8 @@
 Details:
     These check the host-side logic: unit conversion, reply parsing, errors raised for
     ERR replies, events kept separate from replies, the calibration gate, soft limits,
-    the watchdog, and the encoder-feedback `move_by`. The simulator models the
+    the watchdog, the encoder-feedback `move_by`, and that line fragments are
+    never taken as replies. The simulator models the
     firmware's protocol and safety behavior, not the motors' dynamics.
 """
 
@@ -51,7 +52,7 @@ def test_position_parses_and_converts(mc, sim):
 
 def test_err_reply_raises(mc):
     with pytest.raises(ControllerError, match="above MAX_CPS"):
-        mc.set_speed_cps("az", 5000)
+        mc.set_speed_cps("az", 13000)                # cap 12000
 
 
 def test_motion_refused_until_calibrated():
@@ -135,3 +136,12 @@ def test_wait_healthy_times_out_when_mount_off():
     with pytest.raises(ControllerError, match="not healthy"):
         m.wait_healthy(timeout_s=0.6)
     m.close()
+
+
+def test_fragments_are_not_taken_as_replies(mc, sim):
+    # A line cut short (e.g. stale bytes in the port's buffer when it opens) must not be
+    # taken as a reply. Seen on hardware 2026-11-27: "nt" was taken as LIMIT's reply.
+    sim._emit("T uncommanded az delta=56 pwm=4 stop sent")
+    sim._emit("nt")
+    time.sleep(0.3)
+    assert mc.hello() == "mount_controller v2"

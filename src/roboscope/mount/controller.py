@@ -15,8 +15,10 @@ Details:
       - A reader thread splits incoming lines. "EVT ..." lines go to `events` and the
         log: watchdog or limit stops, `link <axis> down/up`, `uncommanded <axis>`
         (the firmware is stopping motion it didn't command), and `garbage <axis>`
-        (an implausible status reply was rejected). Every other line is the reply to
-        the command in flight.
+        (an implausible status reply was rejected). "OK ..." and "ERR ..." lines are
+        the reply to the command in flight. Anything else is a fragment (e.g. bytes
+        left in the port's buffer from before the Uno's reset) and is logged and
+        dropped, so it can never be taken as a reply.
       - An optional keepalive thread sends PING every 0.3 s so the firmware's 1 s
         watchdog doesn't stop a long move. With keepalive off, the mount stops ~1 s
         after the host goes quiet, by design.
@@ -126,8 +128,13 @@ class MotorController:
             if line.startswith("EVT"):
                 self.events.append(line)
                 log.warning("controller event: %s", line)
-            else:
+            elif line.startswith(("OK", "ERR")):
                 self._replies.put(line)
+            else:
+                # A line cut short, e.g. bytes from before the Uno's reset still in the
+                # port's buffer when it opens. Seen 2026-11-27: "T uncommanded az ..."
+                # was taken as the boot line and "nt" as the reply to LIMIT.
+                log.warning("controller: ignored fragment %r", line)
 
     def command(self, line: str, timeout_s: float = 2.0) -> str:
         """Send one command line and return its reply (without the leading 'OK').
@@ -421,7 +428,7 @@ class SimulatedController:
                 self._emit("ERR motor board not answering (mount off?)")
             elif not self.calibrated:
                 self._emit("ERR not calibrated: run CAL")
-            elif abs(cps) > 6500:                  # firmware MAX_CPS
+            elif abs(cps) > 12000:                 # firmware MAX_CPS
                 self._emit("ERR speed above MAX_CPS")
             elif (cps > 0 and ahead >= hi) or (cps < 0 and ahead <= lo):
                 self._emit(f"ERR at limit {a}")

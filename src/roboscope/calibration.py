@@ -4,7 +4,8 @@ Details:
     One JSON file (default config/hardware_calibration.json, committed, so its history
     is the calibration history) describes the instrument independently of any one
     night's setup:
-      - mount: counts per degree per axis, backlash per axis, speed cap, cable limits;
+      - mount: counts per degree per axis, backlash per axis, speed cap, speed
+        regulation accuracy, coast after a stop, test-motion limit;
       - pointing: the pointing-model *hardware* terms (CA, NPAE, TF; SA/SE ideally 0,
         see below) that stay fixed between sessions;
       - cameras: CameraFrame parameters per camera name ("narrow", "wide");

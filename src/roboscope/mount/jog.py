@@ -26,10 +26,12 @@ Details:
       - The firmware's own checks still apply: speed cap, links, uncommanded motion.
 
     Speeds are in degrees/s per axis, clamped to the firmware's cap (MAX_CPS counts/s
-    ÷ counts per degree: Az ≈ 2.11°/s, Alt ≈ 1.54°/s with the 2026-11-24 calibration).
-    The cap was raised from 1300 counts/s on 2026-11-26 at the user's request, to reach
-    the AudioStar handbox's speed 8 (1.5°/s; the page's presets are the handbox's
-    speed ladder from the NG manual). It must match the firmware's MAX_CPS, or the firmware refuses the
+    ÷ counts per degree: Az ≈ 3.89°/s, Alt ≈ 2.84°/s with the 2026-11-24 calibration).
+    The cap was raised from 1300 counts/s to 6500 on 2026-11-26 (the AudioStar
+    handbox's speed 8, 1.5°/s; the page's presets are the handbox's speed ladder from
+    the NG manual), then to 12000 on 2026-11-27 after a step-up test showed regulation
+    holding there (documentation/mount_speed_limits.md). Coast after a stop at the cap
+    is ~0.4-0.6°. It must match the firmware's MAX_CPS, or the firmware refuses the
     clamped speed.
 
     Connection: a background loop opens the port (which resets the Uno: positions
@@ -55,7 +57,7 @@ log = logging.getLogger(__name__)
 HOLD_S = 0.6                    # heartbeat age at which a held axis is stopped
 POLL_S = 0.1                    # position poll (also feeds the firmware watchdog)
 RETRY_S = 5.0                   # reopen interval when the port has failed
-MAX_CPS = 6500.0                # firmware MAX_CPS (firmware/mount_controller; was 1300)
+MAX_CPS = 12000.0               # firmware MAX_CPS (firmware/mount_controller; was 6500)
 UNLIMITED_COUNTS = 1_000_000_000      # ~236,000° or more: no soft limit (fits the int32)
 DEFAULT_SPEED_DPS = 1.0         # the user asked for a default at the fast end (1°/s)
 

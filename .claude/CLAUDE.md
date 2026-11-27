@@ -71,6 +71,10 @@ experimental results are in `documentation/hardware_findings.md`.
   hardware probe and cable test (`-v` logs raw serial bytes).
 - `uv run python scripts/mc_bench_test.py --port /dev/cu.usbmodem113301`: hardware
   bench test of the motor controller (moves both axes; Az within ±3°).
+- `.venv/bin/python scripts/mc_speed_test.py [--axes ..] [--speeds ..] [--repeat N]` on
+  the 3B+ (hub stopped first; it refuses otherwise): moves both axes through a speed
+  ladder up to the cap and reports speed held, run-on and events (legs ≤ 5°, limits
+  ±9.5°; log in data/ on the Pi). Use it for the high-speed watch list.
 - Upload firmware: `arduino-cli upload --fqbn arduino:avr:uno -p <port> firmware/<sketch>`
   with the Uno on this machine; with it on the 3B+ (normal now),
   `scripts/upload_firmware_host_pi.sh` (compiles here, avrdude there, stops and
@@ -108,11 +112,19 @@ experimental results are in `documentation/hardware_findings.md`.
   Stop (`0x05`) via the Arduino. Every Arduino motion command stops itself. Cutting the
   mount's power is the last resort.
 - Never point at or near the Sun. Software must enforce a Sun exclusion zone.
-- Current bench setup (2026-11-24): wires are attached to the telescope. Azimuth motion
-  must stay within ±45° of the position at the start of the session until the user
-  lifts this. Size moves with the measured counts/° (Az ≈ 3,085, Alt ≈ 4,230; see
-  hardware_findings.md) plus margin, never with an unverified ratio. A borrowed figure
+- Current setup (2026-11-27): the tube and camera are mounted and wires are attached.
+  Test motions (anything we script, on either axis) stay within 10° of their start;
+  enforce it with the firmware soft limits (`set_limits_deg`) as well as the move
+  sizes. The user steering from the camera page is exempt (limits lifted there by
+  their choice). This replaces the earlier ±45° azimuth rule. Size moves with the
+  measured counts/° (Az ≈ 3,085, Alt ≈ 4,230; see hardware_findings.md) plus margin,
+  never with an unverified ratio. A borrowed figure
   once sent azimuth to 48°.
+- Speed cap is 12,000 counts/s (Az 3.9, Alt 2.8 °/s) since 2026-11-27, at the user's
+  choice, with a standing request to watch for issues at high speed (garbage or link
+  drops while moving, sagging speed, long coast, brownouts, snags). The watch list is
+  in documentation/mount_speed_limits.md. Report anything seen. Never raise
+  `MAX_DELTA` to go faster.
 - Don't send bytes to a port until it's confirmed what is on the other end. The base's
   AUX port is a Meade accessory port, not the handbox's RS-232 port. Community sources
   (weasner.com, R. Seymour) describe it as a 4-pin modified I2C bus with battery power

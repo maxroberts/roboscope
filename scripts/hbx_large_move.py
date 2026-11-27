@@ -21,6 +21,9 @@ Details:
       3085 counts/° (az). An earlier run used EQMOD-ETX's DS figure (4928) for both,
       which sent azimuth 48° instead of 30°, past the ±45° cable limit.
       documentation/hardware_findings.md has the details.
+    - Since 2026-11-27 (tube and camera mounted) the user's rule caps test motions at
+      10°, so --degrees defaults to 10 and larger values are refused. The 30-48° runs
+      described above predate the rule.
     - Safety: every `run` stops itself inside the sketch. If any reply isn't "OK run",
       the script stops issuing commands and exits. Ctrl-C also stops after the current
       run.
@@ -28,7 +31,7 @@ Details:
 
 Usage:
     uv run python scripts/hbx_large_move.py --fifo <cmd.fifo> --log <replies.log> \
-        --axes alt az --degrees 30 --alt-sign 1 --az-sign 1
+        --axes alt az --degrees 10 --alt-sign 1 --az-sign 1
 """
 
 import argparse
@@ -37,6 +40,7 @@ import time
 from pathlib import Path
 
 RUN_MAX_MS = 10000
+MAX_TEST_DEG = 10.0   # user rule since the tube was mounted (2026-11-27)
 
 
 class Bridge:
@@ -89,7 +93,7 @@ def main() -> None:
     ap.add_argument("--fifo", required=True)
     ap.add_argument("--log", required=True)
     ap.add_argument("--axes", nargs="+", choices=["alt", "az"], default=["alt", "az"])
-    ap.add_argument("--degrees", type=float, default=30.0)
+    ap.add_argument("--degrees", type=float, default=10.0)
     ap.add_argument("--alt-cpd", type=float, default=4230.0, help="alt counts per degree")
     ap.add_argument("--az-cpd", type=float, default=3085.0, help="az counts per degree")
     ap.add_argument("--speed", type=int, default=530640)
@@ -100,6 +104,8 @@ def main() -> None:
     ap.add_argument("--az-sign", type=int, choices=[1, -1], default=1,
                     help="direction of the outward azimuth leg (+1 = 'fwd' = CW from above)")
     args = ap.parse_args()
+    if abs(args.degrees) > MAX_TEST_DEG:
+        ap.error(f"--degrees above {MAX_TEST_DEG}: test motions stay within 10° (user rule, 2026-11-27)")
 
     bridge = Bridge(args.fifo, args.log)
     results = []

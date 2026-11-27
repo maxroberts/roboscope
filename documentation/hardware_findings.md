@@ -1165,9 +1165,120 @@ messages:
 - **Calibration (CAL) looks faster than "max"** to the user: the boards' LED
   calibration drives the motors open-loop at full power, like the handbox's speed 9.
   Where regulation stops keeping up above 6,500 counts/s is not yet known. Coast after
-  a stop at these speeds is unmeasured.
+  a stop was measured the next day (2026-11-27, "speed and coast test").
 - **Altitude soft limit lifted too.** A downward steer stopped with `EVT limit alt
   pos=-188428` (−44.5°): the firmware default of ±190000 counts, counted from wherever
   the mount was at the Uno's last reset. That zero moves with every hub restart, so the
   limit matched nothing physical. `MountJog` now opens both axes' limits on connect
   (user's choice for this supervised tool); the firmware accepted both LIMIT commands.
+
+## 2026-11-27: hub crash-loop reset the Uno during boot
+- At power-up the hub started before the camera Zero was reachable. `main()` opened the
+  mount (resetting the Uno), then exited on the Zero's "No route to host", and systemd
+  restarted it every ~5 s: about 8 Uno resets in the first ~90 s, while the motor
+  boards were also booting.
+- During that window the firmware reported garbage deltas on both axes (up to 30720),
+  the alt link dropping, `EVT uncommanded alt delta=431 pwm=240 stop sent` (possibly
+  ~0.1° of real motion), and once `EVT uncommanded az delta=0 pwm=63 STOP NOT
+  ACKNOWLEDGED - CUT POWER`. The next reset cleared it. After the Zero came up (~45 s)
+  the hub held the port, and the mount has been healthy since (links up, no events).
+- Two host-side bugs surfaced: the controller took line fragments as replies
+  (`"T uncommanded az ..."` as the boot line, `"nt"` as LIMIT's reply, which failed
+  the connect).
+- Fixes: the hub now waits for the Zero (`wait_for_upstream`) before opening the mount,
+  and the controller's reader drops any line that isn't OK/ERR/EVT. Deployed; a hub
+  restart afterwards was clean. Not yet tested through a cold power-up.
+- `throttled=0x50000` within the first minute of uptime: under-voltage again at boot.
+
+## 2026-11-27: speed and coast test up to the 6,500 cap
+- Supervised (user's go-ahead), hub stopped, CAL run first, both soft limits set to
+  ±9.5° from the start (the user's new 10° rule for test motions, tube and camera now
+  mounted). Scratchpad script on the 3B+: each axis, each speed, both directions, 2.2 s
+  hold sampling POS at ~10 Hz, then STOP and sample until the position is still for
+  0.5 s. Ended Az −0.00°, Alt +0.03° from the start; no events, no new under-voltage.
+- **Regulation holds within 1% at every speed up to the cap** (rate over the hold after
+  the first 0.6 s), the worst case 99.3% (Alt +1300):
+
+  | counts/s | Az % (+ / −) | Alt % (+ / −) | Az coast, counts (+ / −) | Alt coast, counts (+ / −) |
+  |---|---|---|---|---|
+  | 1300 | 100.1 / 100.6 | 99.3 / 100.3 | 100 / 47 | 60 / 89 |
+  | 3085 | 100.0 / 99.6 | 100.1 / 100.0 | 148 / 283 | 156 / 147 |
+  | 4742 | 100.0 / 100.1 | 99.9 / 100.0 | 493 / 459 | 346 / 610 |
+  | 6500 | 99.9 / 100.0 | 100.1 / 100.1 | 719 / 792 | 865 / 564 |
+
+- **Coast after STOP** is up to ~0.26° (Az) and ~0.20° (Alt) at the cap, ~0.05–0.09° at
+  1°/s. (The "still within 0.6–0.8 s" first written here was wrong: that script
+  counted until the position had been steady for a further 0.5 s. Corrected by
+  `scripts/mc_speed_test.py` the same day: motion ends 0.05–0.25 s after STOP.) It is
+  measured from the last POS
+  before STOP, so it includes up to one POS round trip of travel before the STOP
+  arrives. Recorded in `config/hardware_calibration.json` (`stop_coast_counts`). Alt is
+  asymmetric at speed (865 up vs 564 down at the cap), probably tube balance.
+- **The PWM field is not a drive-headroom measure:** its median over every steady hold
+  was 0, with an occasional 255. So the plan to read the remaining headroom at the cap
+  from PWM failed. Where regulation stops keeping up above 6,500 counts/s still needs
+  a test firmware with a higher cap (`MAX_DELTA` 1500 per 100 ms allows up to
+  15,000 counts/s).
+- One `err` poll on Az at the first move (1300 counts/s), none afterwards.
+
+## 2026-11-27: step-up test to 12,000 counts/s
+- Why: find where regulation stops keeping up above the 6,500 cap (research notes:
+  [mount_speed_limits.md](mount_speed_limits.md)). Supervised, with the user's go-ahead.
+- How: a temporary firmware build (`MAX_CPS` 12,000, otherwise unchanged) flashed from
+  the 3B+, hub stopped. A scratchpad script set both soft limits to ±9.5° and ran each
+  axis at 6,500, 8,000, 10,000 and 12,000 counts/s, out and back, each leg at most 5°
+  (hold ≤ 2.2 s; rate measured after the first 0.5 s). The normal firmware (6,500) was
+  reflashed afterwards and the hub restarted. Ended Az +0.06°, Alt −0.08° from start.
+
+  | counts/s | Az °/s | Az % (+ / −) | Az coast, counts (+ / −) | Alt °/s | Alt % (+ / −) | Alt coast, counts (+ / −) |
+  |---|---|---|---|---|---|---|
+  | 6,500 | 2.11 | 100.1 / 100.0 | 758 / 702 | 1.54 | 100.3 / 100.1 | 544 / 880 |
+  | 8,000 | 2.59 | 99.9 / 100.4 | 971 / 991 | 1.89 | 100.2 / 100.3 | 1,193 / 1,224 |
+  | 10,000 | 3.24 | 100.4 / 100.0 | 819 / 1,325 | 2.36 | 100.1 / 100.0 | 1,555 / 1,150 |
+  | 12,000 | 3.89 | 99.9 / 100.3 | 1,797 / 1,772 | 2.84 | 100.0 / 100.0 | 1,503 / 1,596 |
+
+- **Regulation holds to 12,000 counts/s on both axes** (Az 3.9, Alt 2.8 °/s). No
+  controller events during the runs; `throttled` unchanged (0x50000, old bits).
+- **Coast** grows to ~0.58° (Az) and ~0.37° (Alt) at 12,000. (Settle times of
+  0.7–0.9 s first written here included a 0.5 s stillness check; motion actually ends
+  ≤ 0.25 s after STOP, see the `mc_speed_test.py` entry below.) The scatter (e.g. Az 819 vs 1,325 at 10,000) is mostly the measurement:
+  coast is counted from the last POS before STOP, and one POS round trip (~50 ms) is
+  ~500 counts at 10,000 counts/s.
+- **Both uploads wedged the boards briefly**, as documented. After the test build's
+  upload: a resync, then links up. After the restore: `EVT garbage az delta=-1949` ×3,
+  then a resync and links up after ~3 s. The stuck-board value 1,949 per poll is just
+  above `MAX_DELTA` (1,500), so `MAX_DELTA` must not be raised to allow more speed.
+  12,000 counts/s (1,200 per 100 ms poll) leaves 25% margin to it.
+- The script logged one boot-line fragment as `ignored fragment` (the new reader
+  filter working).
+- **Cap set to 12,000 counts/s** (user's choice, 2026-11-27): firmware `MAX_CPS`,
+  `roboscope.mount.jog.MAX_CPS`, the simulator and `config/hardware_calibration.json`.
+  The user asked to watch for issues at these speeds; the watch list is in
+  [mount_speed_limits.md](mount_speed_limits.md).
+
+## 2026-11-27: `scripts/mc_speed_test.py` (repeatable speed test) on hardware
+- The new script replaces the two scratchpad scripts of the morning. It is run on the
+  3B+ with the hub stopped; it refused to start while the hub held the port, as designed.
+- Full default ladder (then with 2.2 s holds): 23/24 legs within ±3%, no events,
+  `throttled` unchanged, ended Az −0.16°, Alt −0.11° from start. Logs on the 3B+:
+  `~/roboscope/data/mc_speed_20261127_*.log`.
+
+  | counts/s | Az % (+ / −) | Az run-on °  (+ / −) | Alt % (+ / −) | Alt run-on ° (+ / −) |
+  |---|---|---|---|---|
+  | 200 | 96.5 / 98.6 | 0.003 / 0.005 | 99.3 / 100.2 | 0.001 / 0.002 |
+  | 1,300 | 99.6 / 100.0 | 0.029 / 0.008 | 99.2 / 100.7 | 0.009 / 0.034 |
+  | 3,000 | 99.9 / 100.0 | 0.091 / 0.043 | 100.0 / 99.9 | 0.030 / 0.042 |
+  | 6,500 | 100.1 / 100.1 | 0.246 / 0.118 | 100.1 / 100.1 | 0.135 / 0.209 |
+  | 9,000 | 100.1 / 99.9 | 0.379 / 0.223 | 100.2 / 100.3 | 0.323 / 0.341 |
+  | 12,000 | 99.9 / 100.2 | 0.596 / 0.584 | 99.9 / 100.2 | 0.495 / 0.517 |
+
+- **Low speeds need longer holds.** The one failure was Az +200 at 96.5%, the first leg
+  after the port opened. A rerun (200 counts/s ×3) gave exactly the same +193 on its
+  first leg and 97.6–100.5% on the rest. With 4 s holds (200 and 1,300 counts/s ×2,
+  both axes) all 16 legs were within 1.3%, including the first. 4 s is now the
+  default hold. Fast legs are bounded by the 5° leg limit and are unaffected.
+- **Settle time corrected.** Motion ends 0.05–0.25 s after STOP. The 0.6–0.9 s reported
+  in the two earlier 2026-11-27 entries came from scripts that also counted their
+  0.5 s stillness check; those entries now say so.
+- Run-on matches the step-up test (Alt at 12,000 here ~0.5° vs ~0.37° there; scatter
+  of one POS round trip, ~600 counts at that speed).

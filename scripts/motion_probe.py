@@ -36,7 +36,7 @@ from pathlib import Path
 
 from roboscope.mount import Direction, Mount, SlewRate, Transport
 
-AZ_LIMIT_DEG = 10.0   # well inside the user's ±45° cable limit
+AZ_LIMIT_DEG = 10.0   # the user's 10° test-motion rule (2026-11-27) is the ceiling
 ALT_LIMIT_DEG = 8.0
 SETTLE_S = 1.5
 

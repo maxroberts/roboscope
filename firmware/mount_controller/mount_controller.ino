@@ -34,12 +34,15 @@
  *       - A SPEED command toward a limit already reached is refused.
  *       - Defaults at boot: Az +-30850 counts (~+-10 deg at 3085 counts/deg),
  *         Alt +-190000 (~+-45 deg at 4230 counts/deg).
- *     - Speed cap: |counts/s| <= MAX_CPS. Raised from 1300 to 6500 on 2026-11-26 so
- *       the camera page can steer at the handbox's speed 8, 1.5°/s, on both axes
- *       (cap: Az 2.11, Alt 1.54 °/s). Regulated speeds were tested up to ~1235 before
- *       that; for higher ones see hardware_findings.md (2026-11-26). 6500 × 429.5 fits
- *       the 24-bit speed argument; at 650 counts per 100 ms poll it stays well under
- *       MAX_DELTA.
+ *     - Speed cap: |counts/s| <= MAX_CPS = 12000 (Az 3.89, Alt 2.84 °/s). Raised from
+ *       1300 to 6500 on 2026-11-26 (handbox speed 8, 1.5°/s, on both axes), then to
+ *       12000 on 2026-11-27 at the user's choice. Regulation held within 0.4% up to
+ *       12000 on both axes (hardware_findings.md, "step-up test to 12,000 counts/s";
+ *       documentation/mount_speed_limits.md). 12000 × 429.5 fits the 24-bit speed
+ *       argument. At 1200 counts per 100 ms poll it is 25% under MAX_DELTA. Don't
+ *       raise MAX_DELTA to go faster: stuck boards report exactly 1949 per poll, and
+ *       the filter must keep catching that. Long holds at these speeds are untested;
+ *       documentation/mount_speed_limits.md keeps a watch list.
  *     - Uncommanded motion: once STOP_GRACE_MS has passed since the axis was last
  *       stopped (or CAL ran), an axis at commanded speed 0 that reports PWM > 0, or
  *       moves more than UNCMD_COUNTS on 2 consecutive polls, is sent Stop on every poll
@@ -125,7 +128,7 @@ const uint8_t CMD_SPEED_CHANGE = 0x00, CMD_SPEED_START = 0x01, CMD_CALIBRATE_LED
               CMD_STOP = 0x05, CMD_GET_STATUS = 0x08, CMD_GET_LEDI = 0x09, CMD_SLEEP = 0xE4;
 
 const float SPEED_PER_CPS = 429.5;           // board speed units per count/s (measured)
-const float MAX_CPS = 6500.0;
+const float MAX_CPS = 12000.0;
 const unsigned long WATCHDOG_MS = 1000;
 const unsigned long POLL_MS = 50;            // alternate axes, so each axis every 100 ms
 const unsigned long LOOKAHEAD_MS = 300;
