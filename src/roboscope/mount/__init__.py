@@ -13,6 +13,10 @@ Details:
       - `controller`: `MotorController`, the driver for our own Uno motor controller
         (firmware/mount_controller), which replaces the handbox. This is the main
         motion path; `SimulatedController` is its test double.
+      - `jog`: `MountJog`, hold-to-move manual steering on top of `MotorController`,
+        served by the camera hub (`roboscope.camera.server --mount`) for the camera
+        page's Mount panel: a dead man's switch on browser heartbeats, speed clamped
+        to the firmware cap, no soft limits (user's choice for this supervised tool).
 
     Typical use (main path, our controller):
         with MotorController.open("/dev/cu.usbmodem113301") as mc:

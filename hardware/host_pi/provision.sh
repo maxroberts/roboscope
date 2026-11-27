@@ -9,7 +9,9 @@
 #
 # What it does:
 #   1. Installs packages: unattended-upgrades, git, uhubctl (switches power to the
-#      USB ports, which can power-cycle the camera Zero; see hardware/host_pi/README.md).
+#      USB ports, which can power-cycle the camera Zero; see hardware/host_pi/README.md),
+#      avrdude (uploads firmware to the Uno, which is plugged in here;
+#      scripts/upload_firmware_host_pi.sh).
 #   2. Copies rootfs/ over / (owner root; mode 644, or 600 for NetworkManager keyfiles).
 #      Every file there says it is deployed from the repo. The files are:
 #      - etc/ssh/sshd_config.d/10-roboscope-keyonly.conf: key-only SSH, no root login.
@@ -45,7 +47,7 @@ PI_USER=${SUDO_USER:-max}
 export DEBIAN_FRONTEND=noninteractive
 
 echo "== packages"
-apt-get install -y -q --no-install-recommends unattended-upgrades git uhubctl >/dev/null
+apt-get install -y -q --no-install-recommends unattended-upgrades git uhubctl avrdude >/dev/null
 
 echo "== config files"
 # Files are listed relative to rootfs/ and installed at the same path under /.

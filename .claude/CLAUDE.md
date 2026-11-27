@@ -60,15 +60,21 @@ experimental results are in `documentation/hardware_findings.md`.
   roboscopeCam.local` for the Zero's own server). Camera architecture: the Zero
   (`roboscope-camera` system service) captures and serves raw frames to the 3B+ only,
   over USB; the 3B+'s hub (`systemctl --user` service `roboscope-camera`) renders,
-  locates and serves.
+  locates and serves. With `--mount /dev/ttyACM0` (in its unit) the page's Mount panel
+  steers the mount (`roboscope.mount.jog`); the hub then holds the Uno's port, so
+  `systemctl --user stop roboscope-camera` on the 3B+ before scripts that open the Uno
+  (mc_bench_test.py etc.). For that supervised tool only, the user lifted the soft
+  limits (both axes) and chose no Sun check (2026-11-26); unattended tests keep both rules.
 - `roboscope.camera` also runs on the Pi as `roboscope_camera`: relative imports only,
   numpy + stdlib only. Keep numpy work integer-typed there (ARMv6 is slow).
 - `uv run python scripts/probe_mount.py --port <dev> [--repeat N] [-v]`: read-only
   hardware probe and cable test (`-v` logs raw serial bytes).
 - `uv run python scripts/mc_bench_test.py --port /dev/cu.usbmodem113301`: hardware
   bench test of the motor controller (moves both axes; Az within ±3°).
-- Upload firmware: `arduino-cli upload --fqbn arduino:avr:uno -p <port> firmware/<sketch>`.
-  This is safe with the mount on (pull-ups). Opening the port resets the Uno: positions
+- Upload firmware: `arduino-cli upload --fqbn arduino:avr:uno -p <port> firmware/<sketch>`
+  with the Uno on this machine; with it on the 3B+ (normal now),
+  `scripts/upload_firmware_host_pi.sh` (compiles here, avrdude there, stops and
+  restarts the hub around it). This is safe with the mount on (pull-ups). Opening the port resets the Uno: positions
   re-zero and default limits return. An upload may leave the motor boards out of bus
   sync for ~5 s until auto-recovery, so call `wait_healthy()`. Never re-enable the boot
   resync: it caused the wedges (hardware_findings.md, 2026-11-25).

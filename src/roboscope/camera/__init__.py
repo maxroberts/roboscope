@@ -14,7 +14,8 @@ Details:
         limits: 6, 7 and 8 fps. The Zero captures only ~1.1× as fast as the hub fetches
         (demand-matched capture). Locate and raw downloads always fetch full-size frames.
         The hub renders the browser preview, runs locate and serves the UI on the 3B+'s
-        loopback.
+        loopback. With `--mount /dev/ttyACM0` the UI also steers the mount
+        (`roboscope.mount.jog`, imported only then, so the Zero never needs it).
     Clients:
       - `client.py`: `connect()` returns a `CameraClient` for the hub, directly on the
         3B+ and through an SSH tunnel to `roboscope.local` elsewhere.

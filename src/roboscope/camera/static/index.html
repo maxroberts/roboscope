@@ -4,7 +4,14 @@
   Shows the MJPEG preview (scaled to the panel width, so a reduced preview_size stays
   large on screen), lets the user change CameraSettings (POST /api/settings),
   run a star locate (GET /api/locate), download a snapshot or a raw .npy frame, and
-  polls /api/status every 2 s. Two error lines: a rejected setting stays shown until
+  polls /api/status every 2 s. With a mount (server --mount; GET /api/mount answers),
+  a Mount panel steers it: hold ▲▼◀▶ or the arrow keys to move, release to stop
+  (200 ms jog heartbeats; the server stops an axis 0.6 s after the last one, so a
+  closed tab or lost network stops it too). ■, Space or Esc stops both axes; leaving
+  the tab or window stops them as well. Speed in °/s, default from the server, clamped
+  there to each axis's maximum. The presets are the AudioStar handbox's speeds 1–8,
+  from the NG manual's "Slew Speeds" table (°/s). Positions are mount degrees from the controller's
+  zero, not sky coordinates, and which way "+" turns each axis isn't verified yet. Two error lines: a rejected setting stays shown until
   the next accepted change; below it, the camera's current capture error (status
   last_error, empty once captures succeed again) or a failed status poll. When the server limits preview fps per preview size
   (status.max_preview_fps, the hub), the limit for the chosen size is shown next to
@@ -38,12 +45,37 @@
   dt { color:var(--dim); } dd { margin:0; text-align:right; }
   .err { color:var(--accent); white-space:pre-wrap; }
   a { color:var(--fg); }
+  .pad { display:grid; grid-template-columns:repeat(3, 56px); grid-template-rows:repeat(3, 44px); gap:4px; justify-content:center; margin:6px 0; }
+  .pad button { font-size:18px; touch-action:none; user-select:none; -webkit-user-select:none; }
+  .pad button.held { background:var(--line); border-color:var(--accent); }
+  #m_stop { color:var(--accent); font-weight:bold; }
 </style>
 </head>
 <body>
 <main>
   <div class="view"><img id="stream" src="/stream" alt="camera stream"></div>
   <aside>
+    <section id="mount" hidden>
+      <h2>Mount</h2>
+      <div class="pad">
+        <span></span><button data-axis="alt" data-dir="1" title="Alt + (↑ key)">▲</button><span></span>
+        <button data-axis="az" data-dir="-1" title="Az − (← key)">◀</button>
+        <button id="m_stop" title="stop both axes (Space or Esc)">■</button>
+        <button data-axis="az" data-dir="1" title="Az + (→ key)">▶</button>
+        <span></span><button data-axis="alt" data-dir="-1" title="Alt − (↓ key)">▼</button><span></span>
+      </div>
+      <label>Speed °/s <input id="m_speed" type="number" min="0.001" step="any"></label>
+      <label>&nbsp;<select id="m_preset">
+        <option value="">preset (handbox speed)…</option><option value="max">max (both axes)</option>
+        <option value="1.5">8: 1.5</option><option value="1">7: 1</option><option value="0.5">6: 0.5</option>
+        <option value="0.27">5: 0.27 (64×)</option><option value="0.067">4: 0.067 (16×)</option>
+        <option value="0.033">3: 0.033 (8×)</option><option value="0.008">2: 0.008 (2×)</option>
+        <option value="0.004">1: 0.004 (1× sidereal)</option></select></label>
+      <dl id="m_status"></dl>
+      <div class="row" style="margin-top:6px"><button id="m_cal" type="button">Calibrate encoders</button></div>
+      <div id="m_set_error" class="err"></div>
+      <div id="m_error" class="err"></div>
+    </section>
     <section>
       <h2>Exposure</h2>
       <label>Mode <select id="mode"><option value="binned">binned 1296×972</option><option value="full">full 2592×1944</option></select></label>
@@ -80,6 +112,7 @@
 </main>
 <script>
 const $ = id => document.getElementById(id);
+let mountOn = false;                // the server steers a mount (status.mount, 2 s poll)
 const fields = ["mode","exposure_ms","gain","stretch","black","white","crosshair","preview_size","preview_fps"];
 
 function show(s) {
@@ -137,9 +170,99 @@ async function poll() {
       "saturated %": f.saturated_fraction != null ? 100 * f.saturated_fraction : null,
       "CPU °C": s.temperature_c});
     $("error").textContent = s.last_error || "";
+    if (s.mount !== mountOn) { mountOn = !!s.mount; $("mount").hidden = !mountOn; pollMount(); }
   } catch (e) { $("error").textContent = "status: " + e; }
 }
 poll(); setInterval(poll, 2000);
+
+// ---- Mount panel (shown when the server has --mount) ----
+// Hold a button (or an arrow key) to move; release stops. While held, a jog heartbeat
+// goes out every 200 ms; the server stops an axis whose heartbeat is 0.6 s old, so a
+// closed tab or dropped network also stops it. Speed is per page, default from the
+// server (the fast end), clamped by the server to each axis's maximum.
+const held = {};                    // axis -> {dir, timer}
+let mountMax = null;
+async function mpost(path, body) {
+  const r = await fetch(path, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body || {})});
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error);
+  return j;
+}
+function jogStart(axis, dir) {
+  if (held[axis] && held[axis].dir === dir) return;
+  if (held[axis]) clearInterval(held[axis].timer);
+  const beat = () => mpost("/api/mount/jog", {axis, direction: dir, speed: Number($("m_speed").value)})
+    .then(s => { $("m_set_error").textContent = ""; showMount(s); })
+    .catch(e => { $("m_set_error").textContent = "move refused: " + e.message; });
+  beat();
+  held[axis] = {dir, timer: setInterval(beat, 200)};
+  markHeld();
+}
+function jogStop(axis) {
+  if (!held[axis]) return;
+  clearInterval(held[axis].timer); delete held[axis]; markHeld();
+  mpost("/api/mount/stop", {axis}).catch(e => { $("m_set_error").textContent = "stop: " + e.message; });
+}
+function stopAll() {
+  for (const a in held) { clearInterval(held[a].timer); delete held[a]; }
+  markHeld();
+  mpost("/api/mount/stop", {}).catch(e => { $("m_set_error").textContent = "stop: " + e.message; });
+}
+function markHeld() {
+  for (const b of document.querySelectorAll(".pad button[data-axis]"))
+    b.classList.toggle("held", !!held[b.dataset.axis] && held[b.dataset.axis].dir === Number(b.dataset.dir));
+}
+for (const b of document.querySelectorAll(".pad button[data-axis]")) {
+  const axis = b.dataset.axis, dir = Number(b.dataset.dir);
+  b.addEventListener("pointerdown", e => { b.setPointerCapture(e.pointerId); jogStart(axis, dir); });
+  for (const ev of ["pointerup", "pointercancel", "lostpointercapture"])
+    b.addEventListener(ev, () => { if (held[axis] && held[axis].dir === dir) jogStop(axis); });
+}
+$("m_stop").addEventListener("click", stopAll);
+window.addEventListener("blur", () => { if (Object.keys(held).length) stopAll(); });
+document.addEventListener("visibilitychange", () => { if (document.hidden && Object.keys(held).length) stopAll(); });
+const KEYS = {ArrowUp: ["alt", 1], ArrowDown: ["alt", -1], ArrowLeft: ["az", -1], ArrowRight: ["az", 1]};
+document.addEventListener("keydown", e => {
+  if ($("mount").hidden || ["INPUT", "SELECT"].includes(e.target.tagName)) return;
+  if (e.key === " " || e.key === "Escape") { e.preventDefault(); stopAll(); return; }
+  const k = KEYS[e.key]; if (!k) return;
+  e.preventDefault(); if (!e.repeat) jogStart(k[0], k[1]);
+});
+document.addEventListener("keyup", e => {
+  const k = KEYS[e.key]; if (k && held[k[0]] && held[k[0]].dir === k[1]) jogStop(k[0]);
+});
+$("m_preset").addEventListener("change", e => {
+  const v = e.target.value; if (!v) return;
+  $("m_speed").value = v === "max" ? Math.min(mountMax.az, mountMax.alt) : v;
+  e.target.value = "";
+});
+$("m_cal").addEventListener("click", async () => {
+  if (!confirm("Calibrate the encoder LEDs? Takes ~9 s and turns each motor slightly. Needed after every mount power-up.")) return;
+  $("m_cal").disabled = true;
+  try { showMount(await mpost("/api/mount/calibrate")); $("m_set_error").textContent = ""; }
+  catch (e) { $("m_set_error").textContent = "calibrate: " + e.message; }
+  finally { $("m_cal").disabled = false; }
+});
+function showMount(m) {
+  mountMax = m.max_speed_dps;
+  if (!$("m_speed").value) $("m_speed").value = m.default_speed_dps;
+  const d = m.degrees || {}, v = m.speed_dps || {};
+  list($("m_status"), {
+    "az °": d.az != null ? d.az.toFixed(3) : "–", "alt °": d.alt != null ? d.alt.toFixed(3) : "–",
+    "moving °/s": `az ${fmt(v.az, 3)}, alt ${fmt(v.alt, 3)}`,
+    "max °/s": mountMax ? `az ${mountMax.az}, alt ${mountMax.alt}` : "–",
+    calibrated: m.calibrated == null ? "–" : String(m.calibrated), busy: m.busy || "no",
+  });
+  const hint = m.calibrated === false
+    ? "encoders not calibrated: click Calibrate encoders (needed after every mount power-up; moves are refused until then)" : "";
+  $("m_error").textContent = [hint, m.error, ...(m.events || [])].filter(Boolean).join("\n");
+}
+async function pollMount() {
+  if (!mountOn) return;
+  try { showMount(await (await fetch("/api/mount")).json()); }
+  catch (e) { $("m_error").textContent = "mount status: " + e; }
+}
+setInterval(pollMount, 500);
 </script>
 </body>
 </html>

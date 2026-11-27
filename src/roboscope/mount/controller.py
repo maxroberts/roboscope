@@ -421,7 +421,7 @@ class SimulatedController:
                 self._emit("ERR motor board not answering (mount off?)")
             elif not self.calibrated:
                 self._emit("ERR not calibrated: run CAL")
-            elif abs(cps) > 1300:
+            elif abs(cps) > 6500:                  # firmware MAX_CPS
                 self._emit("ERR speed above MAX_CPS")
             elif (cps > 0 and ahead >= hi) or (cps < 0 and ahead <= lo):
                 self._emit(f"ERR at limit {a}")

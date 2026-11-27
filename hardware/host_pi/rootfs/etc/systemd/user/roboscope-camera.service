@@ -8,15 +8,21 @@
 # without sudo. provision.sh turns on linger for max, so it runs from boot with no login,
 # and enables this unit. Code: ~/roboscope with its uv venv, put there by
 # scripts/deploy_host_pi.sh.
+# --mount: the hub also steers the mount from the page (roboscope.mount.jog), through
+# the Uno at /dev/ttyACM0 (max is in dialout). The hub holds that port while it runs,
+# so stop it (systemctl --user stop roboscope-camera) before running scripts that open
+# the Uno themselves, e.g. mc_bench_test.py. Each hub start resets the Uno (positions
+# re-zero, default limits; the hub then lifts both soft limits). With no Uno, the
+# camera works and the page's mount panel shows the error; the hub retries every 5 s.
 # The Zero boots ~1 min slower than the 3B+. Until its server answers, start-up fails
 # and systemd retries every 5 s, with no start limit.
 [Unit]
-Description=roboscope camera hub (frames from the camera Zero over USB)
+Description=roboscope camera hub (frames from the camera Zero over USB; mount steering)
 StartLimitIntervalSec=0
 
 [Service]
 WorkingDirectory=%h/roboscope
-ExecStart=%h/roboscope/.venv/bin/python -m roboscope.camera.server --source remote --remote-url http://10.12.194.1:47623 --host 127.0.0.1 --port 47623
+ExecStart=%h/roboscope/.venv/bin/python -m roboscope.camera.server --source remote --remote-url http://10.12.194.1:47623 --host 127.0.0.1 --port 47623 --mount /dev/ttyACM0
 Restart=always
 RestartSec=5
 

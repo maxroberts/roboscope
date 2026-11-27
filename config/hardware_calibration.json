@@ -11,7 +11,7 @@
       "alt": {"value": null, "sigma": null, "date": "", "method": "", "note": "Not measured. Below ~1 deg (side scale, 2026-11-24)."}
     },
     "speed_regulation_accuracy_fraction": {"value": 0.015, "sigma": null, "date": "2026-11-24", "method": "commanded vs encoder counts/s at 0.5x-32x sidereal, both axes (hardware_findings.md low-speed sweep)", "note": "Upper bound: at the 100 ms position-sampling resolution."},
-    "max_counts_per_s": {"value": 1300.0, "sigma": null, "date": "2026-11-24", "method": "firmware cap MAX_CPS (firmware/mount_controller)", "note": "Tested up to ~1235 counts/s regulated."},
+    "max_counts_per_s": {"value": 6500.0, "sigma": null, "date": "2026-11-26", "method": "firmware cap MAX_CPS (firmware/mount_controller)", "note": "Raised from 1300 to reach the handbox speed 8 (1.5 deg/s) on both axes. Regulated speeds tested up to ~1235 counts/s on 2026-11-24; higher speeds: hardware_findings.md 2026-11-26."},
     "az_travel_limit_deg": {"value": 45.0, "sigma": null, "date": "2026-11-24", "method": "user rule: cables attached to the telescope", "note": "+- this many degrees from the session start; revisit when cabling is final."}
   },
   "pointing": {

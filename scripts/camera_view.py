@@ -10,8 +10,9 @@ Details:
     debugging. The page shows the stream, exposure/gain/mode and display settings, star
     locate, and snapshot/raw downloads.
 
-    `--synthetic` instead runs a local server with the simulated camera, for trying the
-    UI without the Pis. `scripts/camera_view_via_host.sh` does the same tunnel with
+    `--synthetic` instead runs a local server with the simulated camera and a simulated
+    mount (the page's Mount panel then works against SimulatedController), for trying
+    the UI without the Pis. `scripts/camera_view_via_host.sh` does the same tunnel with
     plain ssh, for machines without the repo, and shares it on the LAN by default; this
     script's tunnel stays on loopback.
 
@@ -36,16 +37,17 @@ def main() -> None:
     p.add_argument("--user", default=DEFAULT_USER)
     p.add_argument("--port", type=int, default=PORT,
                    help=f"local port (default {PORT}, same every run; 0 = any free port)")
-    p.add_argument("--synthetic", action="store_true", help="local simulated camera")
+    p.add_argument("--synthetic", action="store_true", help="local simulated camera and mount")
     p.add_argument("--no-browser", action="store_true")
     a = p.parse_args()
 
     # Fixed port by default, so the URL is the same every run; --port 0 picks a free one.
     if a.synthetic:
-        from roboscope.camera.server import CameraServer
+        from roboscope.camera.server import CameraServer, make_mount
         from roboscope.camera.sources import SyntheticSource
 
-        srv = CameraServer(SyntheticSource(), "127.0.0.1", a.port).start()
+        srv = CameraServer(SyntheticSource(), "127.0.0.1", a.port,
+                           mount=make_mount("sim")).start()
         port, closer = srv.address[1], srv.stop
     else:
         tunnel = SshTunnel(a.host, a.user, local_port=a.port)

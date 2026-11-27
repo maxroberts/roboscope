@@ -1134,3 +1134,40 @@ messages:
 - UV4L's raspicam driver had the camera firmware scale the frames and JPEG-encode them
   in hardware, so little of the work fell on the CPU (its load wasn't recorded in 2019). Our path ships raw 10-bit frames, so locate gets unprocessed pixels, and the
   Zero's CPU does the binning.
+
+## 2026-11-26 evening: speed cap raised for manual steering
+- The user wanted to steer at 1°/s from the camera page. The firmware cap
+  (`MAX_CPS` 1300 counts/s = Az 0.42, Alt 0.31 °/s) blocked it.
+- Baseline, the AudioStar handbox's speeds from the NG manual (local copy
+  `../StarNavigator-NG_InstructionManualV001a.pdf`, "Slew Speeds"): 1 = 1× sidereal
+  (0.004°/s), 2 = 2×, 3 = 8×, 4 = 16×, 5 = 64× (0.27°/s), 6 = 0.5°/s, 7 = 1°/s,
+  8 = 1.5°/s, 9 = "Max" (depends on battery). The handbox speeds measured on 2026-11-24
+  (`:RC` ≈ 0.37, `:RM` ≈ 0.71 °/s in azimuth) fall inside this range.
+- **`MAX_CPS` raised to 6500 counts/s** (Az 2.11, Alt 1.54 °/s), enough for speed 8 on
+  both axes. Firmware uploaded from the 3B+ with `scripts/upload_firmware_host_pi.sh`
+  (avrdude, flash verified). The page's speed presets are the handbox ladder.
+- **Regulated speeds hold up to the new cap.** The user steered from the page
+  (the "max" preset is 1.537°/s, the lower of the two axis caps) while a read-only
+  script sampled `/api/mount` at 10 Hz on the 3B+. Encoder rate over each steady hold
+  (≥ 3 s, first 0.5 s skipped):
+
+  | Axis | Commanded °/s | Encoder °/s | Ratio |
+  |---|---|---|---|
+  | Az | 1.537 (4,742 counts/s) | 1.513 | 98% |
+  | Az | 1.000 | 1.003 | 100% |
+  | Az | 0.270 | 0.272 | 101% |
+  | Alt | 1.537 (6,500 counts/s) | 1.542 | 100% |
+  | Alt | 1.000 | 1.011 | 101% |
+  | Alt | 0.270 | 0.281 | 104% |
+
+  No new under-voltage on the 3B+ (`throttled=0x50000`, both bits from earlier). The
+  ratios include the counts-per-degree uncertainty (±2–3%), since both sides use it.
+- **Calibration (CAL) looks faster than "max"** to the user: the boards' LED
+  calibration drives the motors open-loop at full power, like the handbox's speed 9.
+  Where regulation stops keeping up above 6,500 counts/s is not yet known. Coast after
+  a stop at these speeds is unmeasured.
+- **Altitude soft limit lifted too.** A downward steer stopped with `EVT limit alt
+  pos=-188428` (−44.5°): the firmware default of ±190000 counts, counted from wherever
+  the mount was at the Uno's last reset. That zero moves with every hub restart, so the
+  limit matched nothing physical. `MountJog` now opens both axes' limits on connect
+  (user's choice for this supervised tool); the firmware accepted both LIMIT commands.

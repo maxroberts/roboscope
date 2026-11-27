@@ -11,6 +11,9 @@ Details:
         UI. Loopback only. This is what roboscope and viewers use, so no viewer
         depends on the Zero's Wi-Fi or CPU for previews.
       - **Any machine, `--source synthetic`:** for development and the tests.
+    With `--mount DEVICE` (the hub: the Uno at /dev/ttyACM0; or `sim`), the page also
+    steers the mount: hold-to-move buttons through /api/mount*, handled by
+    roboscope.mount.jog.MountJog (dead man's switch, speed cap; see there).
     Clients reach the hub (or any of these) locally or through an SSH tunnel
     (`client.connect`, `scripts/camera_view.py`). SSH keys are the only access control.
 
@@ -44,6 +47,12 @@ Details:
                                  last_error (only while captures are failing)
       GET  /api/settings         current CameraSettings
       POST /api/settings         JSON object of changes → new settings (400 if invalid)
+      GET  /api/mount            mount status (only with --mount; else 404)
+      POST /api/mount/jog        {"axis": "az"|"alt", "direction": ±1, "speed": deg/s}:
+                                 move for MountJog.HOLD_S more; repeat while held
+      POST /api/mount/stop       {"axis": optional}: stop now
+      POST /api/mount/calibrate  encoder LED calibration (~9 s, motors turn slightly)
+                                 Mount refusals and faults → 409 with "error".
       GET  /api/locate           star centroid in a *fresh* frame (one whose exposure
                                  started after the request, with the current exposure
                                  and gain). Query: k_sigma, min_snr, timeout_s.
@@ -238,8 +247,12 @@ class CameraServer:
     """Capture loop + HTTP server around one frame source (see module notes)."""
 
     def __init__(self, source, host: str = "127.0.0.1", port: int = PORT,
-                 settings: CameraSettings | None = None, quality: int = 70):
+                 settings: CameraSettings | None = None, quality: int = 70, mount=None):
         self.source = source
+        # Optional mount steering (roboscope.mount.jog.MountJog on the hub): serves
+        # /api/mount*. None on the Zero and by default.
+        self.mount = mount
+        self._last_post_error, self._last_post_error_t = "", 0.0   # log rate limit
         self.quality = quality                # preview JPEG quality, 0–100
         self.info = source.info()
         self.settings = settings or CameraSettings()
@@ -317,6 +330,8 @@ class CameraServer:
                 self.latest = frame
                 self.cond.notify_all()
         self.source.close()
+        if self.mount is not None:
+            self.mount.close()
 
     # -- settings and frames ------------------------------------------------------
 
@@ -417,6 +432,7 @@ class CameraServer:
                      "saturated_fraction": float((f.image >= f.saturation).mean())}
         return {"info": self.info, "settings": self.settings.to_dict(),
                 "fps": round(self.fps, 2), "idle": self.idle, "frame": frame, "last_error": self.last_error,
+                "mount": self.mount is not None,
                 "temperature_c": _cpu_temp(), "last_fix": self.last_fix,
                 # per preview size, when the source limits it (the hub); else null
                 "max_preview_fps": ({k: self.source.max_preview_fps(k) for k in PREVIEW_SIZES}
@@ -507,6 +523,8 @@ def _make_handler(srv: CameraServer):
                     self._send(200, srv.preview_jpeg(f), "image/jpeg")
                 elif url.path == "/stream":
                     self._stream()
+                elif url.path == "/api/mount" and srv.mount is not None:
+                    self._json(srv.mount.status())
                 else:
                     self._json({"error": "not found"}, 404)
             except TimeoutError as e:
@@ -516,16 +534,36 @@ def _make_handler(srv: CameraServer):
 
         def do_POST(self):
             srv.last_activity = time.monotonic()
-            if urlparse(self.path).path != "/api/settings":
-                return self._json({"error": "not found"}, 404)
+            path = urlparse(self.path).path
+            m = srv.mount
+            body = None
             try:
                 n = int(self.headers.get("Content-Length", 0))
-                changes = json.loads(self.rfile.read(n) or b"{}")
-                if not isinstance(changes, dict):
+                body = json.loads(self.rfile.read(n) or b"{}")
+                if not isinstance(body, dict):
                     raise ValueError("expected a JSON object")
-                self._json(srv.update_settings(changes).to_dict())
+                if path == "/api/settings":
+                    self._json(srv.update_settings(body).to_dict())
+                elif path == "/api/mount/jog" and m is not None:
+                    self._json(m.jog(str(body.get("axis")), int(body.get("direction", 0)),
+                                     float(body.get("speed", 0))))
+                elif path == "/api/mount/stop" and m is not None:
+                    self._json(m.stop(body.get("axis")))
+                elif path == "/api/mount/calibrate" and m is not None:
+                    self._json(m.calibrate())
+                else:
+                    self._json({"error": "not found"}, 404)
             except (ValueError, TypeError) as e:
+                log.warning("POST %s %s rejected: %s", path, body, e)
                 self._json({"error": str(e)}, 400)
+            except Exception as e:     # mount refusals (ControllerError) and port faults
+                # Logged (at most once per message per 10 s: a held button repeats every
+                # 200 ms), since the page is otherwise the only place these show.
+                msg = f"{type(e).__name__}: {e}"
+                if srv._last_post_error != msg or time.monotonic() - srv._last_post_error_t > 10:
+                    log.warning("POST %s refused: %s", path, msg)
+                    srv._last_post_error, srv._last_post_error_t = msg, time.monotonic()
+                self._json({"error": msg}, 409)
 
         def _stream(self):
             self.send_response(200)
@@ -560,6 +598,23 @@ def _make_handler(srv: CameraServer):
     return Handler
 
 
+def make_mount(device: str):
+    """A MountJog for `device` (a serial port, or "sim" for SimulatedController).
+
+    Imports roboscope.mount (absolute, and pyserial) only here, so the camera package
+    still runs on the Zero, where it is installed alone as `roboscope_camera` and never
+    gets --mount. Counts per degree come from config/hardware_calibration.json.
+    """
+    from roboscope.calibration import HardwareCalibration
+    from roboscope.mount.controller import MotorController, SimulatedController
+    from roboscope.mount.jog import MountJog
+
+    cpd = HardwareCalibration.load().counts_per_degree()
+    if device == "sim":
+        return MountJog(lambda: MotorController(SimulatedController(), counts_per_degree=cpd))
+    return MountJog(lambda: MotorController.open(device, counts_per_degree=cpd))
+
+
 def main(argv=None) -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--source", choices=("pi", "synthetic", "remote"), default="pi")
@@ -570,6 +625,9 @@ def main(argv=None) -> None:
     p.add_argument("--port", type=int, default=PORT, help="0 picks a free port")
     p.add_argument("--quality", type=int, default=70,
                    help="preview JPEG quality, 0-100 (lower: less Pi CPU and Wi-Fi)")
+    p.add_argument("--mount", metavar="DEVICE",
+                   help="also steer the mount from the page: the Uno's serial port "
+                        "(hub only, e.g. /dev/ttyACM0), or 'sim' for a simulated mount")
     p.add_argument("-v", "--verbose", action="store_true")
     a = p.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if a.verbose else logging.INFO,
@@ -582,7 +640,8 @@ def main(argv=None) -> None:
         source = RemoteSource(a.remote_url)
     else:
         source = SyntheticSource()
-    srv = CameraServer(source, a.host, a.port, quality=a.quality).start()
+    mount = make_mount(a.mount) if a.mount else None
+    srv = CameraServer(source, a.host, a.port, quality=a.quality, mount=mount).start()
     try:
         while True:
             time.sleep(3600)

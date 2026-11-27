@@ -3,7 +3,8 @@
 The Raspberry Pi 3B+ that runs roboscope at the telescope (hostname `roboscope`, reached
 as `roboscope.local`). It drives the Arduino motor controller over USB serial, and it
 runs the **camera hub**: it takes frames from the camera Pi Zero over the Zero's USB
-gadget link, and renders the preview, runs locate and serves the camera UI. This folder is the source of
+gadget link, and renders the preview, runs locate and serves the camera UI, whose
+Mount panel steers the telescope through the Uno. This folder is the source of
 truth for its setup: a freshly flashed card plus `scripts/deploy_host_pi.sh` should
 reproduce it. Don't edit config on the Pi directly; edit it here and redeploy.
 
@@ -11,13 +12,13 @@ reproduce it. Don't edit config on the Pi directly; edit it here and redeploy.
 
 | Path | What it is |
 |---|---|
-| `provision.sh` | Runs on the Pi as root. Installs packages (unattended-upgrades, git), copies `rootfs/` over `/`, validates and reloads sshd, disables Bluetooth, brings up the camera link, moves the Wi-Fi connection out of netplan, installs uv and creates an SSH key for the login user, prints `REBOOT NEEDED` when needed. Idempotent. |
+| `provision.sh` | Runs on the Pi as root. Installs packages (unattended-upgrades, git, uhubctl, avrdude), copies `rootfs/` over `/`, validates and reloads sshd, disables Bluetooth, brings up the camera link, moves the Wi-Fi connection out of netplan, installs uv and creates an SSH key for the login user, prints `REBOOT NEEDED` when needed. Idempotent. |
 | `rootfs/etc/ssh/sshd_config.d/10-roboscope-keyonly.conf` | Key-only SSH, no root login (overrides the Imager's `50-cloud-init.conf`). |
 | `rootfs/etc/apt/apt.conf.d/20auto-upgrades` | Daily apt update + unattended-upgrade. |
 | `rootfs/etc/apt/apt.conf.d/52roboscope-unattended-upgrades` | Also lets unattended-upgrades install from the Raspberry Pi origin (Debian's is already in the stock config). No automatic reboot. |
 | `rootfs/etc/NetworkManager/system-connections/roboscope-camlink.nmconnection` | The USB link to the camera Zero: static 10.12.194.2/28, no gateway, bound to the gadget's fixed host-end MAC `02:72:62:00:00:02`. Static because the 3B+ boots faster than the Zero, so DHCP from the Zero could time out. Installed mode 600. |
 | `rootfs/etc/rpi/swap.conf.d/90-roboscope.conf` | Swap to zram only, no swap file. |
-| `rootfs/etc/systemd/user/roboscope-camera.service` | The camera hub: `~/roboscope/.venv/bin/python -m roboscope.camera.server --source remote --remote-url http://10.12.194.1:47623` on 127.0.0.1:47623. It fetches frames at the preview's size and rate, capped per size at the measured limits (full 6, half 7, quarter 8 fps), and tells the Zero its rate so the Zero captures only about that fast. It's a user service for `max` (with linger, so it runs from boot), so code-only deploys can restart it without sudo. It retries every 5 s until the Zero's server answers. |
+| `rootfs/etc/systemd/user/roboscope-camera.service` | The camera hub: `~/roboscope/.venv/bin/python -m roboscope.camera.server --source remote --remote-url http://10.12.194.1:47623 --mount /dev/ttyACM0` on 127.0.0.1:47623. It fetches frames at the preview's size and rate, capped per size at the measured limits (full 6, half 7, quarter 8 fps), and tells the Zero its rate so the Zero captures only about that fast. With `--mount /dev/ttyACM0` it also steers the mount from the page (`roboscope.mount.jog`) and holds the Uno's port while it runs, so stop the hub before running scripts that open the Uno. It's a user service for `max` (with linger, so it runs from boot), so code-only deploys can restart it without sudo. It retries every 5 s until the Zero's server answers. |
 | `rootfs/etc/systemd/journald.conf.d/90-roboscope.conf` | Journal kept on the SD card (max 100 MB) instead of RAM only, so power events and unclean resets can be traced after a reboot. |
 | `rootfs/etc/cloud/cloud-init.disabled` | cloud-init off after provisioning. A fresh card doesn't have this file, so the Imager's first-boot setup still runs. |
 
@@ -49,6 +50,9 @@ the camera hub. `--code-only` repeats just the code sync and the restart.
 - The camera link works ~90–95 s after a cold power-on. The earlier one-way failure is
   fixed on the Zero's side (`hardware/camera_pi`, udev rule 87), with its watchdog as a
   safety net.
+- **Firmware for the Uno:** `scripts/upload_firmware_host_pi.sh` (from the Mac)
+  compiles `firmware/mount_controller` there and uploads it here with avrdude, stopping
+  the camera hub meanwhile because it holds the Uno's port.
 - `uhubctl -l 1-1 -p 2 -a off` / `on` switches power to **all** the 3B+'s USB ports
   together, so it cold-boots the Zero, and also cuts the Uno. Port-level switching
   (`-l 1-1.1 -p 3`) doesn't actually cut the power.

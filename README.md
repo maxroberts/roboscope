@@ -46,10 +46,11 @@ with Mount.connect("/dev/tty.usbserial-XXXX") as m:
 ```
 
 Camera live view and settings in the browser, through an SSH tunnel to the camera hub
-on the host Pi (3B+), which gets frames from the camera Zero over USB:
+on the host Pi (3B+), which gets frames from the camera Zero over USB. Its Mount panel
+steers the telescope: hold ▲▼◀▶ (or the arrow keys) to move, release to stop:
 ```sh
 uv run python scripts/camera_view.py            # http://127.0.0.1:47623/
-uv run python scripts/camera_view.py --synthetic  # simulated camera, no Pi needed
+uv run python scripts/camera_view.py --synthetic  # simulated camera and mount, no Pi needed
 scripts/camera_view_via_host.sh                  # same tunnel with plain ssh, shared on the LAN
 scripts/deploy_camera_pi.sh <Zero IP>            # push Zero config + camera server
 scripts/deploy_host_pi.sh --code-only <3B+ IP>   # push code to the 3B+, restart the hub
@@ -80,6 +81,12 @@ with connect() as cam:                     # the hub: direct on the 3B+, else SS
     - a keepalive for the firmware watchdog;
     - encoder-feedback `move_by`;
     - `SimulatedController` for tests.
+  - `jog.py`: `MountJog`, hold-to-move steering for the camera page (the hub's
+    `--mount /dev/ttyACM0`). The page sends jog heartbeats while a button is held; an
+    axis without one for 0.6 s is stopped. Speed in °/s (default 1, capped at the
+    firmware's 6500 counts/s: Az 2.11, Alt 1.54 °/s; raised from 1300 on 2026-11-26).
+    The presets are the AudioStar handbox's speeds 1–8 (NG manual). For this supervised tool the
+    user lifted both soft limits and chose no Sun check (2026-11-26).
   - The handbox path (`driver.py`) is kept for reference and diagnostics. With it, the
     handbox does its own gotos and tracking, and roboscope only corrects it. Commands
     marked *unverified* in `driver.py` still need confirming on hardware.
@@ -125,7 +132,9 @@ with connect() as cam:                     # the hub: direct on the 3B+, else SS
     - **On the host Pi** (`--source remote`, the *hub*): fetches frames from the Zero
       over USB (`RemoteSource`), at the preview's size and rate (`preview_size`, with
       measured per-size fps limits), renders the preview, finds the star
-      (`starfind.py`, numpy only) and serves the UI. Loopback only.
+      (`starfind.py`, numpy only) and serves the UI. Loopback only. With `--mount` it
+      also serves `/api/mount*` for the page's Mount panel (`mount/jog.py`), and holds
+      the Uno's serial port while it runs.
   - Clients use the hub: `CameraClient` (`client.py`), whose `locate()` is
     `AlignmentSession`'s star finder (`connect()`: direct on the 3B+, SSH tunnel to
     `roboscope.local` elsewhere), and `scripts/camera_view.py` /
